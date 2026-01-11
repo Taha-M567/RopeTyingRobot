@@ -1,0 +1,16 @@
+# Camera configuration
+# Units: pixels for image_size, mm for focal_length
+
+camera:
+  device_id: 0
+  image_size:
+    width: 1920  # pixels
+    height: 1080  # pixels
+  calibration:
+    # Camera intrinsic matrix (3x3)
+    # Load from calibration file if available
+    camera_matrix: null
+    dist_coeffs: null
+    # Or specify focal length and principal point
+    focal_length: null  # mm
+    principal_point: null  # (cx, cy) in pixels

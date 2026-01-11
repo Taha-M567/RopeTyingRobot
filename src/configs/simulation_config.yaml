@@ -1,0 +1,34 @@
+# Isaac Sim configuration
+
+simulation:
+  # Scene setup
+  scene_file: "rope_tying_scene.usd"
+  physics_dt: 0.01  # seconds
+  rendering_dt: 0.033  # seconds (30 FPS)
+
+  # Robot configuration
+  robot_urdf: "robots/ur5.urdf"
+  initial_pose:
+    position: [0.0, 0.0, 0.3]  # meters (x, y, z)
+    orientation: [0.0, 0.0, 0.0, 1.0]  # quaternion (x, y, z, w)
+
+  # Rope configuration
+  rope_length: 0.5  # meters
+  rope_diameter: 0.005  # meters
+  rope_material: "rope_material"
+
+  # Camera configuration
+  cameras:
+    - name: "front_camera"
+      position: [0.5, 0.0, 0.4]  # meters
+      orientation: [0.0, 0.0, 0.0, 1.0]  # quaternion
+      resolution: [1920, 1080]  # pixels
+
+  # Coordinate frames
+  frames:
+    world:
+      origin: [0.0, 0.0, 0.0]
+      rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]  # 3x3 matrix
+    robot_base:
+      origin: [0.0, 0.0, 0.0]
+      rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]

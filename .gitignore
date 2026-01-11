@@ -138,6 +138,9 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv*/
+.venv-wsl
+.venv-wsl/
 env/
 venv/
 ENV/
@@ -198,6 +201,7 @@ cython_debug/
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
+.cursor/
 .cursorignore
 .cursorindexingignore
 
@@ -205,3 +209,24 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project-specific
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Model checkpoints and trained policies
+models/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+# Isaac Sim cache
+.isaac_sim_cache/
+
+# LeRobot cache
+.lerobot_cache/

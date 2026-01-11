@@ -1,0 +1,24 @@
+# Perception configuration
+
+perception:
+  segmentation:
+    method: "color_threshold"  # or "deep_learning", "edge_detection"
+    color_range:
+      lower: [0, 0, 0]  # BGR lower bound
+      upper: [255, 255, 255]  # BGR upper bound
+    blur_kernel_size: 5
+    morph_operations:
+      opening_kernel_size: 3
+      closing_kernel_size: 5
+
+  keypoint_detection:
+    endpoint_detection:
+      method: "contour_analysis"
+      min_confidence: 0.7
+    crossing_detection:
+      method: "skeleton_intersection"
+      min_confidence: 0.6
+
+  skeletonization:
+    method: "zhang_suen"  # or "lee", "medial_axis"
+    prune_length: 10  # pixels
