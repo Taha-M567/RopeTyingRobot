@@ -2,14 +2,35 @@
 
 perception:
   segmentation:
-    method: "color_threshold"  # or "deep_learning", "edge_detection"
+    method: "color_threshold"  # Options: "color_threshold", "edge_detection", "combined", "adaptive"
+    
+    # Color thresholding parameters
     color_range:
+      # HSV color range for black rope (H: 0-180, S: 0-255, V: 0-255)
+      hsv_lower: [0, 0, 0]  # Lower bound in HSV
+      hsv_upper: [180, 50, 80]  # Upper bound in HSV (low saturation, low brightness for black)
+      # Legacy BGR bounds (kept for compatibility)
       lower: [0, 0, 0]  # BGR lower bound
       upper: [255, 255, 255]  # BGR upper bound
-    blur_kernel_size: 5
+    
+    # Preprocessing
+    blur_kernel_size: 5  # Gaussian blur kernel size (must be odd)
+    
+    # Morphological operations
     morph_operations:
-      opening_kernel_size: 3
-      closing_kernel_size: 5
+      opening_kernel_size: 3  # Removes noise (erosion then dilation)
+      closing_kernel_size: 5  # Fills gaps (dilation then erosion)
+    
+    # Edge detection parameters
+    edge_detection:
+      canny_low_threshold: 50  # Lower threshold for Canny edge detection
+      canny_high_threshold: 150  # Upper threshold for Canny edge detection
+    
+    # Contour filtering parameters
+    contour_filter:
+      min_area: 100  # Minimum contour area in pixels (filters noise)
+      max_area: null  # Maximum contour area (null for no limit)
+      min_aspect_ratio: 2.0  # Minimum aspect ratio (length/width) for rope-like shapes
 
   keypoint_detection:
     endpoint_detection:
