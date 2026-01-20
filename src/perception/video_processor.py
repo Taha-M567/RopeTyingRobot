@@ -169,6 +169,7 @@ class LiveVideoProcessor:
 
         try:
             # 1. Segment rope
+            # Apply box filter to reduce noise
             frame = cv2.boxFilter(frame, -1, (4,4) , normalize=True)
             rope_mask = segment_rope(
                 frame,
@@ -182,7 +183,10 @@ class LiveVideoProcessor:
             )
 
             # 3. Skeletonize
-            skeleton = skeletonize_rope(rope_mask.mask)
+            skeleton = skeletonize_rope(
+                rope_mask.mask,
+                config=self.perception_config.get("skeletonization", {}),
+            )
 
             # 4. Extract path
             path = extract_path(skeleton)
