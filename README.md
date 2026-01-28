@@ -67,28 +67,6 @@ VIP_Project_W26/
 └── README.md              # This file
 ```
 
-## Architecture Principles
-
-### Separation of Concerns
-
-- **Perception** (OpenCV) is isolated from robot control
-- **Control** logic is independent of image processing
-- **Learning** code is separate from hardware interfaces
-- **Simulation** mirrors real hardware interfaces
-
-### Code Style
-
-- **Naming**: snake_case for variables/functions, PascalCase for classes
-- **Type Hints**: All functions must have type hints
-- **Documentation**: Every module, class, and public function has docstrings
-- **Style Guide**: PEP8 compliant, max line length 88 characters
-
-### Configuration
-
-- All tunable parameters live in YAML config files
-- No hardcoded paths or magic numbers
-- Config files include units and comments
-
 ## Installation
 
 1. Clone the repository:
@@ -120,36 +98,3 @@ Edit configuration files in `src/configs/` to customize:
 - Perception algorithms
 - Training hyperparameters
 - Simulation setup
-
-## Development Guidelines
-
-1. **Type Hints**: Always use type hints for function arguments and return values
-2. **Docstrings**: Document purpose, inputs, outputs, and assumptions
-3. **Error Handling**: Use explicit exceptions, never silently fail
-4. **Logging**: Use the `logging` module (not `print`)
-5. **Testing**: Write unit tests for new functionality
-6. **Reproducibility**: Use fixed seeds for learning code
-
-## Coordinate Frames
-
-The system uses explicit coordinate frames:
-- **Camera frame**: Image coordinates
-- **Robot base frame**: Robot workspace coordinates
-- **World frame**: Global simulation/hardware coordinates
-
-All transformations between frames must be explicitly documented.
-
-## Safety
-
-- All motion commands include bounds checking
-- Emergency stop functionality is integrated
-- Real-time constraints are documented
-- Hardware safety limits are enforced
-
-## License
-
-[Add license information here]
-
-## Contributors
-
-[Add contributor information here]
