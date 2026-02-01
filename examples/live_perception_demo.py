@@ -104,7 +104,7 @@ def main() -> None:
         # Press 'q' to quit
         logger.info("Press 'q' to quit")
         processor.run_continuous(
-            target_fps=10.0,  # Process at 10 FPS
+            target_fps=1,  # Process at 10 FPS
             check_quit_key=True,  # Check for 'q' key to quit
         )
 

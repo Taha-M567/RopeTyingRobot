@@ -6,20 +6,23 @@ perception:
     
     # Color thresholding parameters
     color_range:
+      # HSV range for white rope
+      hsv_lower: [0, 0, 180]
+      hsv_upper: [180, 40, 255]
       # HSV color range for black rope (H: 0-180, S: 0-255, V: 0-255)
-      hsv_lower: [0, 0, 0]  # Lower bound in HSV
-      hsv_upper: [180, 50, 80]  # Upper bound in HSV (low saturation, low brightness for black)
+      # hsv_lower: [0, 0, 0]  # Lower bound in HSV
+      # hsv_upper: [180, 50, 80]  # Upper bound in HSV (low saturation, low brightness for black)
       # Legacy BGR bounds (kept for compatibility)
       lower: [0, 0, 0]  # BGR lower bound
       upper: [255, 255, 255]  # BGR upper bound
     
     # Preprocessing
-    blur_kernel_size: 5  # Gaussian blur kernel size (must be odd)
+    blur_kernel_size: 7  # Gaussian blur kernel size (must be odd)
     
     # Morphological operations
     morph_operations:
-      opening_kernel_size: 3  # Removes noise (erosion then dilation)
-      closing_kernel_size: 5  # Fills gaps (dilation then erosion)
+      opening_kernel_size: 5  # Removes noise (erosion then dilation)
+      closing_kernel_size: 7  # Fills gaps (dilation then erosion)
     
     # Edge detection parameters
     edge_detection:

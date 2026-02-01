@@ -4,8 +4,8 @@
 camera:
   device_id: 0
   image_size:
-    width: 1920  # pixels
-    height: 1080  # pixels
+    width: 480  # pixels
+    height: 640  # pixels
   calibration:
     # Camera intrinsic matrix (3x3)
     # Load from calibration file if available

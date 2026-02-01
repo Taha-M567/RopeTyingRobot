@@ -46,7 +46,7 @@ class Camera:
     def connect(self) -> None:
         """Connect to camera hardware."""
         # TODO: Implement camera connection
-        self.cap = cv2.VideoCapture(self.camera_id)
+        self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
 
     def disconnect(self) -> None:
         """Disconnect from camera."""
