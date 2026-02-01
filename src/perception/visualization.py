@@ -4,14 +4,16 @@ This module provides functions to visualize rope perception results.
 Note: Display functions are only called when explicitly requested.
 """
 
-from typing import List, Optional
-
 import cv2
 import numpy as np
 
-from src.perception.keypoint_detection import Keypoint
+from src.perception.keypoint_mask import (
+    BACKGROUND_CLASS,
+    CROSSING_CLASS,
+    ENDPOINT_CLASS,
+    ROPE_CLASS,
+)
 from src.perception.rope_segmentation import RopeMask
-from src.perception.state_estimation import RopeState
 from src.perception.video_processor import ProcessingResult
 
 
@@ -39,50 +41,41 @@ def draw_rope_mask(
     return result
 
 
-def draw_keypoints(
+def draw_keypoint_mask_overlay(
     image: np.ndarray,
-    keypoints: List[Keypoint],
-    radius: int = 5,
+    class_mask: np.ndarray,
+    alpha: float = 0.5,
+    rope_color: tuple = (255, 255, 255),
+    endpoint_color: tuple = (0, 255, 0),
+    crossing_color: tuple = (0, 0, 255),
 ) -> np.ndarray:
-    """Draw keypoints on image.
+    """Overlay a color-coded keypoint mask on the image.
 
     Args:
         image: Image to draw on (BGR format)
-        keypoints: List of Keypoint objects
-        radius: Radius of keypoint circles
+        class_mask: Class-labeled mask (0=bg, 1=rope, 2=endpoint, 3=crossing)
+        alpha: Transparency of overlay
+        rope_color: BGR color for rope pixels
+        endpoint_color: BGR color for endpoint pixels
+        crossing_color: BGR color for crossing pixels
 
     Returns:
-        Image with keypoints drawn
+        Image with keypoint mask overlay
     """
-    result = image.copy()
+    if class_mask is None or class_mask.size == 0:
+        return image
 
-    # Color mapping for keypoint types
-    colors = {
-        "endpoint": (0, 255, 0),  # Green
-        "crossing": (0, 0, 255),  # Red
-        "knot": (255, 0, 255),  # Magenta
-    }
+    color_mask = np.zeros_like(image, dtype=np.uint8)
+    color_mask[class_mask == ROPE_CLASS] = rope_color
+    color_mask[class_mask == ENDPOINT_CLASS] = endpoint_color
+    color_mask[class_mask == CROSSING_CLASS] = crossing_color
 
-    for kp in keypoints:
-        x, y = int(kp.position[0]), int(kp.position[1])
-        color = colors.get(kp.keypoint_type, (255, 255, 255))
+    # Only blend where we have rope pixels
+    mask_region = (class_mask != BACKGROUND_CLASS).astype(np.uint8) * 255
+    mask_region = cv2.cvtColor(mask_region, cv2.COLOR_GRAY2BGR)
+    overlay = cv2.bitwise_and(color_mask, mask_region)
 
-        # Draw circle
-        cv2.circle(result, (x, y), radius, color, -1)
-
-        # Draw label
-        label = f"{kp.keypoint_type}: {kp.confidence:.2f}"
-        cv2.putText(
-            result,
-            label,
-            (x + radius + 2, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.4,
-            color,
-            1,
-        )
-
-    return result
+    return cv2.addWeighted(image, 1.0 - alpha, overlay, alpha, 0)
 
 
 def draw_rope_path(
@@ -130,7 +123,7 @@ def visualize_result(
     Args:
         result: ProcessingResult object
         show_mask: Whether to overlay segmentation mask
-        show_keypoints: Whether to draw keypoints
+        show_keypoints: Whether to overlay keypoint mask
         show_path: Whether to draw rope path
 
     Returns:
@@ -145,7 +138,10 @@ def visualize_result(
         vis_image = draw_rope_path(vis_image, result.rope_state.path)
 
     if show_keypoints:
-        vis_image = draw_keypoints(vis_image, result.keypoints)
+        vis_image = draw_keypoint_mask_overlay(
+            vis_image,
+            result.keypoint_mask,
+        )
 
     # Add processing info text
     info_text = (
@@ -183,7 +179,7 @@ def display_result(
         result: ProcessingResult object
         window_name: Name of display window
         show_mask: Whether to overlay segmentation mask
-        show_keypoints: Whether to draw keypoints
+        show_keypoints: Whether to overlay keypoint mask
         show_path: Whether to draw rope path
     """
     vis_image = visualize_result(

@@ -61,16 +61,14 @@ def _count_neighbors(skeleton: np.ndarray) -> np.ndarray:
     return neighbor_count
 
 
-def _find_largest_contour(mask: np.ndarray) -> Optional[np.ndarray]:
-    """Find the largest contour in the binary mask."""
+def _find_contours(mask: np.ndarray) -> List[np.ndarray]:
+    """Find contours in the binary mask."""
     contours, _ = cv2.findContours(
         mask,
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE,
     )
-    if not contours:
-        return None
-    return max(contours, key=cv2.contourArea)
+    return contours if contours else []
 
 
 def _sample_contour_points(contour: np.ndarray) -> np.ndarray:
@@ -124,11 +122,12 @@ def _detect_endpoints_from_contour(
     min_confidence: float,
 ) -> List[Keypoint]:
     """Detect endpoints using contour analysis."""
-    contour = _find_largest_contour(mask)
-    if contour is None:
+    contours = _find_contours(mask)
+    if not contours:
         return []
 
-    points = _sample_contour_points(contour)
+    points_list = [_sample_contour_points(contour) for contour in contours]
+    points = np.vstack(points_list) if points_list else np.empty((0, 2))
     pair = _farthest_point_pair(points)
     if pair is None:
         return []
@@ -220,7 +219,10 @@ def detect_keypoints(
 
     Args:
         mask: Binary mask of the rope
-        config: Configuration dictionary with detection parameters
+        config: Configuration dictionary with detection parameters, including:
+            - endpoint_detection: endpoint method and thresholds
+            - crossing_detection: crossing method and thresholds
+            - skeletonization: optional skeletonization config overrides
 
     Returns:
         List of Keypoint objects
@@ -248,10 +250,11 @@ def detect_keypoints(
     crossing_min_conf = crossing_config.get("min_confidence", 0.6)
 
     keypoints: List[Keypoint] = []
+    skeletonization_config = config.get("skeletonization", {})
 
     skeleton: Optional[np.ndarray] = None
     if crossing_method == "skeleton_intersection":
-        skeleton = skeletonize_rope(mask, config={})
+        skeleton = skeletonize_rope(mask, config=skeletonization_config)
 
     if endpoint_method == "contour_analysis":
         keypoints.extend(
@@ -266,7 +269,7 @@ def detect_keypoints(
             )
     else:
         if skeleton is None:
-            skeleton = skeletonize_rope(mask, config={})
+            skeleton = skeletonize_rope(mask, config=skeletonization_config)
         keypoints.extend(
             _detect_endpoints_from_skeleton(
                 skeleton,
@@ -276,7 +279,7 @@ def detect_keypoints(
 
     if crossing_method == "skeleton_intersection":
         if skeleton is None:
-            skeleton = skeletonize_rope(mask, config={})
+            skeleton = skeletonize_rope(mask, config=skeletonization_config)
         keypoints.extend(
             _detect_crossings_from_skeleton(
                 skeleton,

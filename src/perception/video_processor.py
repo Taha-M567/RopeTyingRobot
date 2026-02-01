@@ -16,6 +16,7 @@ import numpy as np
 
 from src.hardware.camera import Camera
 from src.perception.keypoint_detection import Keypoint, detect_keypoints
+from src.perception.keypoint_mask import create_keypoint_class_mask
 from src.perception.rope_segmentation import RopeMask, segment_rope
 from src.perception.skeletonization import extract_path, skeletonize_rope
 from src.perception.state_estimation import RopeState, estimate_rope_state
@@ -32,6 +33,7 @@ class ProcessingResult:
         frame: Original frame (BGR format)
         rope_mask: Segmentation result
         keypoints: Detected keypoints
+        keypoint_mask: Class-labeled mask for rope/endpoints/crossings
         rope_state: Estimated rope state
         processing_time: Time taken to process frame (seconds)
         frame_number: Sequential frame number
@@ -40,6 +42,7 @@ class ProcessingResult:
     frame: np.ndarray
     rope_mask: RopeMask
     keypoints: list[Keypoint]
+    keypoint_mask: np.ndarray
     rope_state: RopeState
     processing_time: float
     frame_number: int
@@ -182,6 +185,12 @@ class LiveVideoProcessor:
                 config=self.perception_config.get("keypoint_detection", {}),
             )
 
+            keypoint_mask = create_keypoint_class_mask(
+                rope_mask.mask,
+                keypoints,
+                config=self.perception_config.get("keypoint_mask", {}),
+            )
+
             # 3. Skeletonize
             skeleton = skeletonize_rope(
                 rope_mask.mask,
@@ -200,6 +209,7 @@ class LiveVideoProcessor:
                 frame=frame,
                 rope_mask=rope_mask,
                 keypoints=keypoints,
+                keypoint_mask=keypoint_mask,
                 rope_state=rope_state,
                 processing_time=processing_time,
                 frame_number=frame_num,

@@ -35,6 +35,9 @@ BINARY_THRESHOLD = 127
 BINARY_MAX = 255
 DEFAULT_PRUNE_LENGTH = 10
 MAX_PRUNE_ITERATIONS = 100
+DEFAULT_PRE_CLOSE_KERNEL_SIZE = 0
+DEFAULT_PRE_DILATE_KERNEL_SIZE = 0
+DEFAULT_PRE_DILATE_ITERATIONS = 1
 
 
 def _skeletonize_zhang_suen(mask: np.ndarray) -> np.ndarray:
@@ -497,6 +500,9 @@ def skeletonize_rope(
         config: Optional configuration dictionary with:
             - method: "zhang_suen" (default)
             - prune_length: int, pixels to prune (default: 10)
+            - pre_close_kernel_size: int, closing kernel size before thinning
+            - pre_dilate_kernel_size: int, dilation kernel size before thinning
+            - pre_dilate_iterations: int, dilation iterations
 
     Returns:
         Binary mask of the skeleton (uint8, 0/255)
@@ -526,6 +532,29 @@ def skeletonize_rope(
 
     method = config.get("method", "zhang_suen")
     prune_length = config.get("prune_length", DEFAULT_PRUNE_LENGTH)
+    pre_close_kernel_size = int(
+        config.get("pre_close_kernel_size", DEFAULT_PRE_CLOSE_KERNEL_SIZE)
+    )
+    pre_dilate_kernel_size = int(
+        config.get("pre_dilate_kernel_size", DEFAULT_PRE_DILATE_KERNEL_SIZE)
+    )
+    pre_dilate_iterations = int(
+        config.get("pre_dilate_iterations", DEFAULT_PRE_DILATE_ITERATIONS)
+    )
+
+    if pre_close_kernel_size > 0:
+        close_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (pre_close_kernel_size, pre_close_kernel_size),
+        )
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+
+    if pre_dilate_kernel_size > 0:
+        dilate_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (pre_dilate_kernel_size, pre_dilate_kernel_size),
+        )
+        mask = cv2.dilate(mask, dilate_kernel, iterations=pre_dilate_iterations)
 
     # Skeletonization
     try:
