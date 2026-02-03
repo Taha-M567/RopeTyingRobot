@@ -170,9 +170,14 @@ class LiveVideoProcessor:
         # Process frame through perception pipeline
         start_time = time.time()
 
-        # Temporary toggles: set to False (or comment out) to restore full pipeline.
-        disable_keypoint_extraction = False
-        disable_skeletonization = False
+        # Pipeline toggles (configurable)
+        pipeline_cfg = self.perception_config.get("pipeline", {})
+        disable_keypoint_extraction = bool(
+            pipeline_cfg.get("disable_keypoint_extraction", False)
+        )
+        disable_skeletonization = bool(
+            pipeline_cfg.get("disable_skeletonization", False)
+        )
 
         try:
             # 1. Segment rope

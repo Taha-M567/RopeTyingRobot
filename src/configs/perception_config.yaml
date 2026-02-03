@@ -1,13 +1,17 @@
 # Perception configuration
 
 perception:
+  pipeline:
+    disable_keypoint_extraction: false  # Skip keypoints for faster preview
+    disable_skeletonization: false  # Skip skeleton/path extraction
+
   segmentation:
     method: "color_threshold"  # Options: "color_threshold", "edge_detection", "combined", "adaptive"
     
     # Color thresholding parameters
     color_range:
       # HSV range for white rope
-      hsv_lower: [0, 0, 60]
+      hsv_lower: [0, 0, 90]
       hsv_upper: [180, 160, 255]
 
 
@@ -21,8 +25,8 @@ perception:
     # Preprocessing
     blur_kernel_size: 5  # Gaussian blur kernel size (must be odd)
     pre_box_filter:
-      enabled: false
-      kernel_size: 4
+      enabled: true
+      kernel_size: 3
     
     # Morphological operations
     morph_operations:
@@ -41,6 +45,10 @@ perception:
       min_aspect_ratio: 1.2  # Minimum aspect ratio (length/width) for rope-like shapes
       hole_fill_max_area: 400  # Fill small holes; larger loop interiors are preserved
       hollow_fill_ratio_threshold: 0.35  # Skip aspect ratio for hollow (loop-like) contours
+
+    cleanup:
+      min_area: 300  # pixels; remove small blobs before skeletonization
+      keep_largest: true  # keep the largest connected component
 
   keypoint_detection:
     endpoint_detection:

@@ -117,6 +117,40 @@ def draw_rope_path(
     return result
 
 
+def draw_rope_edges(
+    image: np.ndarray,
+    edges: list[np.ndarray],
+    color: tuple = (255, 0, 0),
+    thickness: int = 2,
+) -> np.ndarray:
+    """Draw rope edges (graph paths) on image.
+
+    Args:
+        image: Image to draw on (BGR format)
+        edges: List of (N, 2) arrays, each an edge path
+        color: Path color (BGR tuple)
+        thickness: Line thickness
+
+    Returns:
+        Image with edge paths drawn
+    """
+    result = image.copy()
+
+    if not edges:
+        return result
+
+    for edge in edges:
+        if edge is None or len(edge) < 2:
+            continue
+        points = edge.astype(np.int32)
+        for i in range(len(points) - 1):
+            pt1 = tuple(points[i])
+            pt2 = tuple(points[i + 1])
+            cv2.line(result, pt1, pt2, color, thickness)
+
+    return result
+
+
 def visualize_result(
     result: ProcessingResult,
     show_mask: bool = True,
@@ -139,8 +173,12 @@ def visualize_result(
     if show_mask:
         vis_image = draw_rope_mask(vis_image, result.rope_mask)
 
-    if show_path and len(result.rope_state.path) > 0:
-        vis_image = draw_rope_path(vis_image, result.rope_state.path)
+    if show_path:
+        path_graph = getattr(result.rope_state, "path_graph", None)
+        if path_graph is not None and len(path_graph.get("edges", [])) > 0:
+            vis_image = draw_rope_edges(vis_image, path_graph["edges"])
+        elif len(result.rope_state.path) > 0:
+            vis_image = draw_rope_path(vis_image, result.rope_state.path)
 
     if show_keypoints:
         vis_image = draw_keypoint_mask_overlay(

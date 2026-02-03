@@ -176,6 +176,57 @@ def _filter_contours(
     return filtered_mask
 
 
+
+
+def _cleanup_connected_components(
+    mask: np.ndarray,
+    min_area: int = 0,
+    keep_largest: bool = False,
+) -> np.ndarray:
+    """Remove small connected components from a binary mask.
+
+    Args:
+        mask: Binary mask (uint8, 0/255)
+        min_area: Minimum area in pixels to keep (0 disables)
+        keep_largest: If True, always keep the largest component
+
+    Returns:
+        Cleaned binary mask (uint8, 0/255)
+    """
+    if mask.size == 0:
+        return mask
+    if min_area <= 0 and not keep_largest:
+        return mask
+
+    binary = (mask > 0).astype(np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        binary,
+        connectivity=8,
+    )
+
+    if num_labels <= 1:
+        return mask
+
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    keep = np.zeros(num_labels, dtype=bool)
+
+    if keep_largest and len(areas) > 0:
+        largest_idx = 1 + int(np.argmax(areas))
+        keep[largest_idx] = True
+
+    if min_area > 0:
+        for label_idx, area in enumerate(areas, start=1):
+            if area >= min_area:
+                keep[label_idx] = True
+
+    cleaned = np.zeros_like(binary)
+    for label_idx in range(1, num_labels):
+        if keep[label_idx]:
+            cleaned[labels == label_idx] = 255
+
+    return cleaned
+
+
 def _calculate_confidence(
     mask: np.ndarray,
     image_shape: Tuple[int, int],
@@ -292,6 +343,13 @@ def _segment_by_color(
         hollow_fill_ratio_threshold,
     )
 
+    cleanup_cfg = config.get("cleanup", {})
+    mask = _cleanup_connected_components(
+        mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
+    )
+
     return mask
 
 
@@ -362,6 +420,13 @@ def _segment_by_edges(
         hollow_fill_ratio_threshold,
     )
 
+    cleanup_cfg = config.get("cleanup", {})
+    mask = _cleanup_connected_components(
+        mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
+    )
+
     return mask
 
 
@@ -404,6 +469,13 @@ def _segment_combined(
         combined_mask,
         opening_kernel_size=3,
         closing_kernel_size=closing_size,
+    )
+
+    cleanup_cfg = config.get("cleanup", {})
+    combined_mask = _cleanup_connected_components(
+        combined_mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
     )
 
     return combined_mask, agreement

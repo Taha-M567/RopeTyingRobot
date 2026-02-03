@@ -19,22 +19,7 @@ VIP_Project_W26/
 │   │   ├── keypoint_detection.py   # Detect endpoints, crossings, knots
 │   │   ├── skeletonization.py      # Extract rope centerline
 │   │   └── state_estimation.py     # Estimate rope state
-│   │
-│   ├── control/                    # Robot control
-│   │   ├── __init__.py
-│   │   ├── trajectory_planner.py   # Motion planning
-│   │   ├── policy_interface.py     # LeRobot policy wrapper
-│   │   └── robot_controller.py     # Robot control interface
-│   │
-│   ├── learning/                   # LeRobot training
-│   │   ├── __init__.py
-│   │   ├── dataset.py              # Dataset handling with versioning
-│   │   └── trainer.py              # Policy training with logging
-│   │
-│   ├── simulation/                 # Isaac Sim
-│   │   ├── __init__.py
-│   │   └── isaac_sim_env.py        # Simulation environment
-│   │
+|   |
 │   ├── hardware/                   # Real hardware
 │   │   ├── __init__.py
 │   │   ├── camera.py               # Camera interface
@@ -63,12 +48,6 @@ VIP_Project_W26/
 │   └── utils/                      # Utility tests
 │       └── test_geometry.py
 │
-├── data/                           # Data directories
-│   ├── raw/                        # Raw data
-│   │   └── .gitkeep
-│   └── processed/                  # Processed datasets
-│       └── .gitkeep
-│
 ├── logs/                           # Log files
 │   └── .gitkeep
 │
@@ -91,30 +70,6 @@ VIP_Project_W26/
   - State estimation from perception data
 - **Outputs**: Well-defined dataclasses with documented coordinate frames
 - **Rules**: Never read from disk internally, never display images unless requested
-
-### Control (`src/control/`)
-- **Purpose**: Robot motion control and policy execution
-- **Responsibilities**:
-  - Trajectory planning with bounds checking
-  - Policy interface for LeRobot models
-  - Robot control abstraction
-- **Rules**: All motion commands must have bounds checking, emergency stop support
-
-### Learning (`src/learning/`)
-- **Purpose**: Dataset management and policy training
-- **Responsibilities**:
-  - Dataset loading with versioning and metadata
-  - Policy training with LeRobot
-  - Evaluation and metrics logging
-- **Rules**: Reproducible (fixed seeds), clear logging, separate train/inference paths
-
-### Simulation (`src/simulation/`)
-- **Purpose**: Isaac Sim integration
-- **Responsibilities**:
-  - Simulation environment setup
-  - Coordinate frame definitions
-  - Hardware-mirroring interfaces
-- **Rules**: Must mirror real hardware interfaces, no simulation-only hacks
 
 ### Hardware (`src/hardware/`)
 - **Purpose**: Real hardware interfaces
