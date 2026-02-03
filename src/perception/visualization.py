@@ -155,7 +155,7 @@ def visualize_result(
         info_text,
         (10, 30),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
+        0.5,
         (255, 255, 255),
         2,
     )
