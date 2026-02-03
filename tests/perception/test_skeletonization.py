@@ -163,11 +163,12 @@ def test_extract_graph_structure():
     skeleton = np.zeros((30, 30), dtype=np.uint8)
     skeleton[15, 10:20] = 255
 
-    endpoints, junctions, edges = _extract_graph_structure(skeleton)
+    endpoints, junctions, edges, edge_nodes = _extract_graph_structure(skeleton)
 
     assert isinstance(endpoints, np.ndarray)
     assert isinstance(junctions, np.ndarray)
     assert isinstance(edges, list)
+    assert isinstance(edge_nodes, list)
     assert endpoints.shape[1] == 2  # (x, y) coordinates
     assert junctions.shape[1] == 2  # (x, y) coordinates
     # Should have 2 endpoints for a line

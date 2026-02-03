@@ -24,7 +24,7 @@ perception:
     # Morphological operations
     morph_operations:
       opening_kernel_size: 3  # Removes noise (erosion then dilation)
-      closing_kernel_size: 5  # Fills gaps (dilation then erosion)
+      closing_kernel_size: 3  # Fills gaps (dilation then erosion)
     
     # Edge detection parameters
     edge_detection:
