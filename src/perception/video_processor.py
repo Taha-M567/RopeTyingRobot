@@ -170,6 +170,10 @@ class LiveVideoProcessor:
         # Process frame through perception pipeline
         start_time = time.time()
 
+        # Temporary toggles: set to False (or comment out) to restore full pipeline.
+        disable_keypoint_extraction = True
+        disable_skeletonization = False
+
         try:
             # 1. Segment rope
             # Apply box filter to reduce noise
@@ -180,25 +184,30 @@ class LiveVideoProcessor:
             )
 
             # 2. Detect keypoints
-            keypoints = detect_keypoints(
-                rope_mask.mask,
-                config=self.perception_config.get("keypoint_detection", {}),
-            )
-
-            keypoint_mask = create_keypoint_class_mask(
-                rope_mask.mask,
-                keypoints,
-                config=self.perception_config.get("keypoint_mask", {}),
-            )
+            if disable_keypoint_extraction:
+                keypoints = []
+                keypoint_mask = np.zeros_like(rope_mask.mask, dtype=np.uint8)
+            else:
+                keypoints = detect_keypoints(
+                    rope_mask.mask,
+                    config=self.perception_config.get("keypoint_detection", {}),
+                )
+                keypoint_mask = create_keypoint_class_mask(
+                    rope_mask.mask,
+                    keypoints,
+                    config=self.perception_config.get("keypoint_mask", {}),
+                )
 
             # 3. Skeletonize
-            skeleton = skeletonize_rope(
-                rope_mask.mask,
-                config=self.perception_config.get("skeletonization", {}),
-            )
-
-            # 4. Extract path
-            path = extract_path(skeleton)
+            if disable_skeletonization:
+                path = np.array([], dtype=np.float32).reshape(0, 2)
+            else:
+                skeleton = skeletonize_rope(
+                    rope_mask.mask,
+                    config=self.perception_config.get("skeletonization", {}),
+                )
+                # 4. Extract path
+                path = extract_path(skeleton)
 
             # 5. Estimate state
             rope_state = estimate_rope_state(keypoints, path)

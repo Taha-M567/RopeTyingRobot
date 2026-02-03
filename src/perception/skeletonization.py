@@ -5,7 +5,7 @@ to a graph-aware structured representation.
 """
 
 import logging
-from typing import List, Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict
 
 import cv2
 import numpy as np
@@ -33,7 +33,7 @@ class PathDict(TypedDict):
 
 BINARY_THRESHOLD = 127
 BINARY_MAX = 255
-DEFAULT_PRUNE_LENGTH = 10
+DEFAULT_PRUNE_LENGTH = 20
 MAX_PRUNE_ITERATIONS = 100
 DEFAULT_PRE_CLOSE_KERNEL_SIZE = 0
 DEFAULT_PRE_DILATE_KERNEL_SIZE = 0
@@ -281,22 +281,25 @@ def _cluster_junctions(skeleton: np.ndarray) -> np.ndarray:
     return np.array(junction_centers, dtype=np.float32)
 
 
-def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarray, List[np.ndarray]]:
+def _extract_graph_structure(
+    skeleton: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, List[np.ndarray], List[Tuple[int, int]]]:
     """Extract graph structure from skeleton (endpoints, junctions, edges).
 
     Args:
         skeleton: Binary skeleton mask (uint8, 0/255)
 
     Returns:
-        Tuple of (endpoints, junctions, edges) where:
+        Tuple of (endpoints, junctions, edges, edge_nodes) where:
         - endpoints: (E, 2) array of (x, y) coordinates
         - junctions: (J, 2) array of (x, y) coordinates
         - edges: List of (Ni, 2) arrays, each representing an edge path
+        - edge_nodes: List of (node_i, node_j) indices for each edge
     """
     if skeleton.size == 0 or np.count_nonzero(skeleton) == 0:
         empty_endpoints = np.array([], dtype=np.float32).reshape(0, 2)
         empty_junctions = np.array([], dtype=np.float32).reshape(0, 2)
-        return empty_endpoints, empty_junctions, []
+        return empty_endpoints, empty_junctions, [], []
 
     neighbor_count = _count_neighbors(skeleton)
     skeleton_binary = (skeleton > BINARY_THRESHOLD).astype(np.uint8)
@@ -331,6 +334,7 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
 
     # Extract edges by tracing paths between nodes
     edges = []
+    edge_nodes: List[Tuple[int, int]] = []
     visited_edges = set()
 
     # For each pair of nodes, check if there's a path
@@ -355,6 +359,7 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
                 # Convert path to (x, y) coordinates
                 path_xy = np.array([[col, row] for row, col in path], dtype=np.float32)
                 edges.append(path_xy)
+                edge_nodes.append((i, j))
                 visited_edges.add(edge_key)
 
     # Handle loops (0 endpoints) - extract as closed path
@@ -368,7 +373,114 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
                 path_xy = np.array([[col, row] for row, col in loop_path], dtype=np.float32)
                 edges.append(path_xy)
 
-    return endpoints, junctions, edges
+    return endpoints, junctions, edges, edge_nodes
+
+
+def _build_main_path(
+    endpoints: np.ndarray,
+    junctions: np.ndarray,
+    edges: List[np.ndarray],
+    edge_nodes: List[Tuple[int, int]],
+) -> Optional[np.ndarray]:
+    """Build a main path by finding the longest path through the graph."""
+    if not edges or not edge_nodes:
+        return None
+
+    all_nodes = np.vstack([endpoints, junctions]) if len(junctions) > 0 else endpoints
+    if all_nodes.size == 0:
+        return None
+
+    # Build adjacency with edge lengths as weights.
+    adjacency: Dict[int, List[Tuple[int, int, float]]] = {}
+    for edge_index, (i, j) in enumerate(edge_nodes):
+        length = float(len(edges[edge_index]))
+        adjacency.setdefault(i, []).append((j, edge_index, length))
+        adjacency.setdefault(j, []).append((i, edge_index, length))
+
+    candidate_nodes = list(range(len(all_nodes)))
+    if len(endpoints) >= 2:
+        candidate_nodes = list(range(len(endpoints)))
+
+    # Dijkstra from each candidate node to find the farthest candidate.
+    best_distance = -1.0
+    best_pair = None
+    best_prev: Dict[int, Tuple[int, int]] = {}
+
+    for start in candidate_nodes:
+        # Standard Dijkstra on sparse adjacency.
+        distances = {start: 0.0}
+        prev: Dict[int, Tuple[int, int]] = {}
+        visited = set()
+        queue = [(0.0, start)]
+
+        while queue:
+            dist, node = queue.pop(0)
+            if node in visited:
+                continue
+            visited.add(node)
+
+            for neighbor, edge_index, weight in adjacency.get(node, []):
+                new_dist = dist + weight
+                if neighbor not in distances or new_dist < distances[neighbor]:
+                    distances[neighbor] = new_dist
+                    prev[neighbor] = (node, edge_index)
+                    queue.append((new_dist, neighbor))
+            queue.sort(key=lambda x: x[0])
+
+        for end in candidate_nodes:
+            if end == start or end not in distances:
+                continue
+            if distances[end] > best_distance:
+                best_distance = distances[end]
+                best_pair = (start, end)
+                best_prev = prev
+
+    if best_pair is None:
+        return None
+
+    # Reconstruct node path from best_prev.
+    start, end = best_pair
+    node_path = [end]
+    edge_path = []
+    current = end
+    while current != start:
+        if current not in best_prev:
+            break
+        prev_node, edge_index = best_prev[current]
+        node_path.append(prev_node)
+        edge_path.append(edge_index)
+        current = prev_node
+    node_path.reverse()
+    edge_path.reverse()
+
+    if not edge_path:
+        return None
+
+    # Stitch edge pixel paths in order, aligning orientation to node order.
+    stitched: List[np.ndarray] = []
+    for idx, edge_index in enumerate(edge_path):
+        edge = edges[edge_index]
+        node_idx = node_path[idx]
+        next_node_idx = node_path[idx + 1]
+        node_xy = all_nodes[node_idx]
+        next_node_xy = all_nodes[next_node_idx]
+
+        start_dist = np.linalg.norm(edge[0] - node_xy)
+        end_dist = np.linalg.norm(edge[-1] - node_xy)
+        edge_oriented = edge if start_dist <= end_dist else edge[::-1]
+
+        # Ensure the end aligns with the next node; flip if needed.
+        if np.linalg.norm(edge_oriented[-1] - next_node_xy) > np.linalg.norm(
+            edge_oriented[0] - next_node_xy
+        ):
+            edge_oriented = edge_oriented[::-1]
+
+        if stitched:
+            stitched.append(edge_oriented[1:])  # drop duplicate junction point
+        else:
+            stitched.append(edge_oriented)
+
+    return np.concatenate(stitched, axis=0)
 
 
 def _trace_path_between_nodes(
@@ -609,15 +721,10 @@ def extract_path(skeleton: np.ndarray) -> PathDict:
 
     try:
         # Extract graph structure
-        endpoints, junctions, edges = _extract_graph_structure(skeleton)
+        endpoints, junctions, edges, edge_nodes = _extract_graph_structure(skeleton)
 
-        # Determine if simple chain (2 endpoints, 0 junctions)
-        if len(endpoints) == 2 and len(junctions) == 0 and len(edges) > 0:
-            # Use the longest edge as main_path
-            longest_edge = max(edges, key=len)
-            main_path = longest_edge
-        else:
-            main_path = None
+        # Determine a main path even with junctions by finding the longest graph path.
+        main_path = _build_main_path(endpoints, junctions, edges, edge_nodes)
 
         # Handle single pixel case
         if len(endpoints) == 1 and len(junctions) == 0 and len(edges) == 0:
