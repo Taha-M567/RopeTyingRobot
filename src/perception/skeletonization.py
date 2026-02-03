@@ -34,6 +34,7 @@ class PathDict(TypedDict):
 BINARY_THRESHOLD = 127
 BINARY_MAX = 255
 DEFAULT_PRUNE_LENGTH = 20
+DEFAULT_CLOSE_LOOP_MAX_GAP = 0
 MAX_PRUNE_ITERATIONS = 100
 DEFAULT_PRE_CLOSE_KERNEL_SIZE = 0
 DEFAULT_PRE_DILATE_KERNEL_SIZE = 0
@@ -113,12 +114,15 @@ def _count_neighbors(skeleton: np.ndarray) -> np.ndarray:
 def _postprocess_skeleton(
     skeleton: np.ndarray,
     prune_length: int = DEFAULT_PRUNE_LENGTH,
+    close_loop_max_gap: int = DEFAULT_CLOSE_LOOP_MAX_GAP,
 ) -> np.ndarray:
     """Post-process skeleton: remove isolated pixels and prune short branches.
 
     Args:
         skeleton: Binary skeleton mask (uint8, 0/255)
         prune_length: Minimum branch length to keep (pixels)
+        close_loop_max_gap: If > 0, close small gaps between exactly two
+            endpoints within this pixel distance.
 
     Returns:
         Cleaned skeleton mask (uint8, 0/255)
@@ -235,6 +239,21 @@ def _postprocess_skeleton(
                     skeleton_binary[pr, pc] = 0
                 changed = True
 
+    if close_loop_max_gap > 0:
+        # Recompute endpoints after pruning and close tiny gaps for loops.
+        neighbor_count = _count_neighbors(
+            (skeleton_binary * BINARY_MAX).astype(np.uint8)
+        )
+        endpoints_mask = (neighbor_count == 1) & (skeleton_binary > 0)
+        endpoint_coords = np.column_stack(np.where(endpoints_mask))
+
+        if len(endpoint_coords) == 2:
+            (r1, c1), (r2, c2) = endpoint_coords
+            dr = int(r1) - int(r2)
+            dc = int(c1) - int(c2)
+            if dr * dr + dc * dc <= close_loop_max_gap * close_loop_max_gap:
+                cv2.line(skeleton_binary, (int(c1), int(r1)), (int(c2), int(r2)), 1, 1)
+
     return (skeleton_binary * BINARY_MAX).astype(np.uint8)
 
 
@@ -308,7 +327,13 @@ def _extract_graph_structure(
     endpoints_mask = (neighbor_count == 1) & (skeleton_binary > 0)
     endpoint_coords = np.column_stack(np.where(endpoints_mask))
     # Convert to (x, y) = (col, row)
-    endpoints = np.array([[col, row] for row, col in endpoint_coords], dtype=np.float32)
+    if len(endpoint_coords) == 0:
+        endpoints = np.array([], dtype=np.float32).reshape(0, 2)
+    else:
+        endpoints = np.array(
+            [[col, row] for row, col in endpoint_coords],
+            dtype=np.float32,
+        )
 
     # Get clustered junctions
     junctions = _cluster_junctions(skeleton)
@@ -601,6 +626,42 @@ def _trace_loop(
     return None
 
 
+def _trace_loop_from_skeleton(
+    skeleton: np.ndarray,
+    max_start_trials: int = 50,
+) -> Optional[List[Tuple[int, int]]]:
+    """Trace a loop path from a skeleton by trying degree-2 start pixels.
+
+    Args:
+        skeleton: Binary skeleton mask (uint8, 0/255)
+        max_start_trials: Maximum number of start points to try
+
+    Returns:
+        Loop path as list of (row, col) coordinates, or None
+    """
+    if skeleton.size == 0 or np.count_nonzero(skeleton) == 0:
+        return None
+
+    skeleton_binary = (skeleton > BINARY_THRESHOLD).astype(np.uint8)
+    neighbor_count = _count_neighbors((skeleton_binary * BINARY_MAX).astype(np.uint8))
+
+    # Prefer degree-2 pixels for loop tracing; fallback to any skeleton pixel.
+    degree_two = np.column_stack(
+        np.where((neighbor_count == 2) & (skeleton_binary > 0))
+    )
+    candidates = degree_two
+    if len(candidates) == 0:
+        candidates = np.column_stack(np.where(skeleton_binary > 0))
+
+    for idx in range(min(max_start_trials, len(candidates))):
+        row, col = candidates[idx]
+        loop = _trace_loop(skeleton_binary, (int(row), int(col)))
+        if loop is not None and len(loop) > 2:
+            return loop
+
+    return None
+
+
 def skeletonize_rope(
     mask: np.ndarray,
     config: Optional[dict] = None,
@@ -612,6 +673,8 @@ def skeletonize_rope(
         config: Optional configuration dictionary with:
             - method: "zhang_suen" (default)
             - prune_length: int, pixels to prune (default: 10)
+            - close_loop_max_gap: int, max pixel gap to close between
+              exactly two endpoints (default: 0 = disabled)
             - pre_close_kernel_size: int, closing kernel size before thinning
             - pre_dilate_kernel_size: int, dilation kernel size before thinning
             - pre_dilate_iterations: int, dilation iterations
@@ -644,6 +707,9 @@ def skeletonize_rope(
 
     method = config.get("method", "zhang_suen")
     prune_length = config.get("prune_length", DEFAULT_PRUNE_LENGTH)
+    close_loop_max_gap = int(
+        config.get("close_loop_max_gap", DEFAULT_CLOSE_LOOP_MAX_GAP)
+    )
     pre_close_kernel_size = int(
         config.get("pre_close_kernel_size", DEFAULT_PRE_CLOSE_KERNEL_SIZE)
     )
@@ -681,7 +747,11 @@ def skeletonize_rope(
 
     # Post-processing
     try:
-        skeleton = _postprocess_skeleton(skeleton, prune_length=prune_length)
+        skeleton = _postprocess_skeleton(
+            skeleton,
+            prune_length=prune_length,
+            close_loop_max_gap=close_loop_max_gap,
+        )
     except Exception as e:
         logger.warning(f"Post-processing failed: {e}, returning unprocessed skeleton")
 
@@ -725,6 +795,22 @@ def extract_path(skeleton: np.ndarray) -> PathDict:
 
         # Determine a main path even with junctions by finding the longest graph path.
         main_path = _build_main_path(endpoints, junctions, edges, edge_nodes)
+
+        # If the main path is missing or too short, try to recover a full loop
+        # directly from the skeleton.
+        skeleton_count = int(np.count_nonzero(skeleton))
+        if skeleton_count > 0:
+            main_path_len = 0 if main_path is None else len(main_path)
+            if len(endpoints) == 0 or main_path_len < int(0.7 * skeleton_count):
+                loop_path = _trace_loop_from_skeleton(skeleton)
+                if loop_path is not None:
+                    loop_xy = np.array(
+                        [[col, row] for row, col in loop_path], dtype=np.float32
+                    )
+                    if main_path is None or len(loop_xy) > len(main_path):
+                        main_path = loop_xy
+                        if not edges:
+                            edges = [loop_xy]
 
         # Handle single pixel case
         if len(endpoints) == 1 and len(junctions) == 0 and len(edges) == 0:

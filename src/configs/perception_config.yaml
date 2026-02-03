@@ -7,8 +7,8 @@ perception:
     # Color thresholding parameters
     color_range:
       # HSV range for white rope
-      hsv_lower: [0, 0, 105]
-      hsv_upper: [180, 110, 255]
+      hsv_lower: [0, 0, 60]
+      hsv_upper: [180, 160, 255]
 
 
       # HSV color range for black rope (H: 0-180, S: 0-255, V: 0-255)
@@ -20,11 +20,14 @@ perception:
     
     # Preprocessing
     blur_kernel_size: 5  # Gaussian blur kernel size (must be odd)
+    pre_box_filter:
+      enabled: false
+      kernel_size: 4
     
     # Morphological operations
     morph_operations:
       opening_kernel_size: 3  # Removes noise (erosion then dilation)
-      closing_kernel_size: 3  # Fills gaps (dilation then erosion)
+      closing_kernel_size: 5  # Fills gaps (dilation then erosion)
     
     # Edge detection parameters
     edge_detection:
@@ -33,9 +36,11 @@ perception:
     
     # Contour filtering parameters
     contour_filter:
-      min_area: 200  # Minimum contour area in pixels (filters noise)
+      min_area: 80  # Minimum contour area in pixels (filters noise)
       max_area: null  # Maximum contour area (null for no limit)
-      min_aspect_ratio: 1.5  # Minimum aspect ratio (length/width) for rope-like shapes
+      min_aspect_ratio: 1.2  # Minimum aspect ratio (length/width) for rope-like shapes
+      hole_fill_max_area: 400  # Fill small holes; larger loop interiors are preserved
+      hollow_fill_ratio_threshold: 0.35  # Skip aspect ratio for hollow (loop-like) contours
 
   keypoint_detection:
     endpoint_detection:
@@ -46,8 +51,9 @@ perception:
       min_confidence: 0.9
     skeletonization:
       method: "zhang_suen"
-      prune_length: 20
-      pre_close_kernel_size: 0
+      prune_length: 15
+      close_loop_max_gap: 12
+      pre_close_kernel_size: 5
       pre_dilate_kernel_size: 0
       pre_dilate_iterations: 1
 
@@ -58,6 +64,7 @@ perception:
   skeletonization:
     method: "zhang_suen"  # or "lee", "medial_axis"
     prune_length: 15  # pixels
-    pre_close_kernel_size: 3  # pixels, 0 disables
+    close_loop_max_gap: 12  # pixels; close tiny gaps to recover loops
+    pre_close_kernel_size: 5  # pixels, 0 disables
     pre_dilate_kernel_size: 0  # pixels, 0 disables
     pre_dilate_iterations: 1

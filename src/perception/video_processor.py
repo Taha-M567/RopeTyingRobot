@@ -176,11 +176,16 @@ class LiveVideoProcessor:
 
         try:
             # 1. Segment rope
-            # Apply box filter to reduce noise
-            frame = cv2.boxFilter(frame, -1, (4,4) , normalize=True)
+            # Optional pre-filter to reduce noise (disabled by default).
+            segmentation_config = self.perception_config.get("segmentation", {})
+            box_filter_cfg = segmentation_config.get("pre_box_filter", {})
+            if box_filter_cfg.get("enabled", False):
+                kernel = int(box_filter_cfg.get("kernel_size", 4))
+                kernel = max(1, kernel)
+                frame = cv2.boxFilter(frame, -1, (kernel, kernel), normalize=True)
             rope_mask = segment_rope(
                 frame,
-                config=self.perception_config.get("segmentation"),
+                config=segmentation_config,
             )
 
             # 2. Detect keypoints
