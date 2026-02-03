@@ -19,6 +19,13 @@ BINARY_MAX = 255
 MAX_CONTOUR_SAMPLE_POINTS = 2000
 CROSSING_SIZE_SCALE = 10.0
 MIN_ENDPOINTS_FOR_PAIR = 2
+DEFAULT_MERGE_DISTANCE = 6.0
+DEFAULT_CROSSING_MIN_AREA = 8
+DEFAULT_CROSSING_MIN_NEIGHBORS = 3
+DEFAULT_CROSSING_MIN_BRANCH_LENGTH = 8
+DEFAULT_CROSSING_MIN_BRANCH_COUNT = 3
+
+MAX_BRANCH_TRACE_STEPS = 200
 
 
 @dataclass
@@ -176,13 +183,19 @@ def _detect_endpoints_from_skeleton(
 def _detect_crossings_from_skeleton(
     skeleton: np.ndarray,
     min_confidence: float,
+    min_area: int,
+    min_neighbor_count: int,
+    min_branch_length: int,
+    min_branch_count: int,
 ) -> List[Keypoint]:
-    """Detect crossings from skeleton pixels with 3+ neighbors."""
+    """Detect crossings from skeleton junction pixels."""
     if skeleton.size == 0 or np.count_nonzero(skeleton) == 0:
         return []
 
     neighbor_count = _count_neighbors(skeleton)
-    junction_mask = (neighbor_count >= 3) & (skeleton > BINARY_THRESHOLD)
+    junction_mask = (neighbor_count >= min_neighbor_count) & (
+        skeleton > BINARY_THRESHOLD
+    )
 
     if np.count_nonzero(junction_mask) == 0:
         return []
@@ -193,9 +206,99 @@ def _detect_crossings_from_skeleton(
         connectivity=8,
     )
 
+    skeleton_binary = (skeleton > BINARY_THRESHOLD).astype(np.uint8)
+    endpoint_mask = (neighbor_count == 1) & (skeleton_binary > 0)
+
+    def _branch_reaches_length(
+        start_rc: tuple[int, int],
+        cluster_pixels: set[tuple[int, int]],
+    ) -> bool:
+        """Check if a branch reaches a minimum length away from a junction."""
+        prev = None
+        current = start_rc
+        length = 0
+
+        while length < min_branch_length and length < MAX_BRANCH_TRACE_STEPS:
+            length += 1
+
+            if endpoint_mask[current]:
+                break
+
+            neighbors = []
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr, nc = current[0] + dr, current[1] + dc
+                    if nr < 0 or nr >= skeleton_binary.shape[0]:
+                        continue
+                    if nc < 0 or nc >= skeleton_binary.shape[1]:
+                        continue
+                    if skeleton_binary[nr, nc] == 0:
+                        continue
+                    if prev is not None and (nr, nc) == prev:
+                        continue
+                    if (nr, nc) in cluster_pixels:
+                        continue
+                    neighbors.append((nr, nc))
+
+            if not neighbors:
+                break
+            if len(neighbors) != 1:
+                # Hit a branch or ambiguous junction; count current length.
+                break
+
+            next_rc = neighbors[0]
+            if junction_mask[next_rc]:
+                # Reached another junction.
+                break
+
+            prev = current
+            current = next_rc
+
+        return length >= min_branch_length
+
     keypoints = []
     for label_idx in range(1, num_labels):
         area = float(stats[label_idx, cv2.CC_STAT_AREA])
+        if area < float(min_area):
+            continue
+
+        # Collect cluster pixels for this junction.
+        cluster_pixels = set(
+            zip(
+                *np.where(labels == label_idx)
+            )
+        )
+
+        # Find branch starts: skeleton pixels adjacent to the cluster.
+        branch_starts = set()
+        for row, col in cluster_pixels:
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr, nc = row + dr, col + dc
+                    if nr < 0 or nr >= skeleton_binary.shape[0]:
+                        continue
+                    if nc < 0 or nc >= skeleton_binary.shape[1]:
+                        continue
+                    if skeleton_binary[nr, nc] == 0:
+                        continue
+                    if (nr, nc) in cluster_pixels:
+                        continue
+                    if junction_mask[nr, nc]:
+                        continue
+                    branch_starts.add((nr, nc))
+
+        valid_branches = 0
+        for start_rc in branch_starts:
+            if _branch_reaches_length(start_rc, cluster_pixels):
+                valid_branches += 1
+
+        if valid_branches < min_branch_count:
+            continue
+
         x, y = centroids[label_idx]
         confidence = area / (area + CROSSING_SIZE_SCALE)
         if confidence < min_confidence:
@@ -211,6 +314,33 @@ def _detect_crossings_from_skeleton(
     return keypoints
 
 
+def _merge_keypoints_by_distance(
+    keypoints: List[Keypoint],
+    merge_distance: float,
+) -> List[Keypoint]:
+    """Merge keypoints of the same type that are within merge_distance."""
+    if not keypoints:
+        return []
+
+    merged: List[Keypoint] = []
+    for kp in keypoints:
+        found = False
+        for idx, existing in enumerate(merged):
+            if kp.keypoint_type != existing.keypoint_type:
+                continue
+            dx = kp.position[0] - existing.position[0]
+            dy = kp.position[1] - existing.position[1]
+            if (dx * dx + dy * dy) <= merge_distance * merge_distance:
+                if kp.confidence > existing.confidence:
+                    merged[idx] = kp
+                found = True
+                break
+        if not found:
+            merged.append(kp)
+
+    return merged
+
+
 def detect_keypoints(
     mask: np.ndarray,
     config: dict,
@@ -222,6 +352,7 @@ def detect_keypoints(
         config: Configuration dictionary with detection parameters, including:
             - endpoint_detection: endpoint method and thresholds
             - crossing_detection: crossing method and thresholds
+              (min_area, min_neighbor_count, min_branch_length, min_branch_count)
             - skeletonization: optional skeletonization config overrides
 
     Returns:
@@ -245,37 +376,90 @@ def detect_keypoints(
 
     endpoint_method = endpoint_config.get("method", "contour_analysis")
     endpoint_min_conf = endpoint_config.get("min_confidence", 0.7)
+    endpoint_merge_distance = float(
+        endpoint_config.get("merge_distance", DEFAULT_MERGE_DISTANCE)
+    )
 
     crossing_method = crossing_config.get("method", "skeleton_intersection")
     crossing_min_conf = crossing_config.get("min_confidence", 0.6)
+    crossing_min_area = int(
+        crossing_config.get("min_area", DEFAULT_CROSSING_MIN_AREA)
+    )
+    crossing_min_neighbors = int(
+        crossing_config.get("min_neighbor_count", DEFAULT_CROSSING_MIN_NEIGHBORS)
+    )
+    crossing_min_branch_length = int(
+        crossing_config.get(
+            "min_branch_length",
+            DEFAULT_CROSSING_MIN_BRANCH_LENGTH,
+        )
+    )
+    crossing_min_branch_count = int(
+        crossing_config.get(
+            "min_branch_count",
+            DEFAULT_CROSSING_MIN_BRANCH_COUNT,
+        )
+    )
 
     keypoints: List[Keypoint] = []
     skeletonization_config = config.get("skeletonization", {})
 
     skeleton: Optional[np.ndarray] = None
-    if crossing_method == "skeleton_intersection":
+    needs_skeleton = crossing_method == "skeleton_intersection" or endpoint_method in (
+        "skeleton_endpoints",
+        "combined",
+    )
+    if needs_skeleton:
         skeleton = skeletonize_rope(mask, config=skeletonization_config)
 
+    endpoint_keypoints: List[Keypoint] = []
     if endpoint_method == "contour_analysis":
-        keypoints.extend(
+        endpoint_keypoints.extend(
             _detect_endpoints_from_contour(mask, min_confidence=endpoint_min_conf)
         )
-        if not keypoints and skeleton is not None:
-            keypoints.extend(
+        if not endpoint_keypoints and skeleton is not None:
+            endpoint_keypoints.extend(
                 _detect_endpoints_from_skeleton(
                     skeleton,
                     min_confidence=endpoint_min_conf,
                 )
             )
-    else:
-        if skeleton is None:
-            skeleton = skeletonize_rope(mask, config=skeletonization_config)
-        keypoints.extend(
-            _detect_endpoints_from_skeleton(
-                skeleton,
-                min_confidence=endpoint_min_conf,
+    elif endpoint_method == "skeleton_endpoints":
+        if skeleton is not None:
+            endpoint_keypoints.extend(
+                _detect_endpoints_from_skeleton(
+                    skeleton,
+                    min_confidence=endpoint_min_conf,
+                )
             )
+        if not endpoint_keypoints:
+            endpoint_keypoints.extend(
+                _detect_endpoints_from_contour(
+                    mask,
+                    min_confidence=endpoint_min_conf,
+                )
+            )
+    elif endpoint_method == "combined":
+        endpoint_keypoints.extend(
+            _detect_endpoints_from_contour(mask, min_confidence=endpoint_min_conf)
         )
+        if skeleton is not None:
+            endpoint_keypoints.extend(
+                _detect_endpoints_from_skeleton(
+                    skeleton,
+                    min_confidence=endpoint_min_conf,
+                )
+            )
+        endpoint_keypoints = _merge_keypoints_by_distance(
+            endpoint_keypoints,
+            merge_distance=endpoint_merge_distance,
+        )
+    else:
+        endpoint_keypoints.extend(
+            _detect_endpoints_from_contour(mask, min_confidence=endpoint_min_conf)
+        )
+
+    keypoints.extend(endpoint_keypoints)
 
     if crossing_method == "skeleton_intersection":
         if skeleton is None:
@@ -284,6 +468,10 @@ def detect_keypoints(
             _detect_crossings_from_skeleton(
                 skeleton,
                 min_confidence=crossing_min_conf,
+                min_area=crossing_min_area,
+                min_neighbor_count=crossing_min_neighbors,
+                min_branch_length=crossing_min_branch_length,
+                min_branch_count=crossing_min_branch_count,
             )
         )
 

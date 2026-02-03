@@ -11,7 +11,7 @@ perception:
     # Color thresholding parameters
     color_range:
       # HSV range for white rope
-      hsv_lower: [0, 0, 90]
+      hsv_lower: [0, 0, 80]
       hsv_upper: [180, 160, 255]
 
 
@@ -30,8 +30,8 @@ perception:
     
     # Morphological operations
     morph_operations:
-      opening_kernel_size: 3  # Removes noise (erosion then dilation)
-      closing_kernel_size: 5  # Fills gaps (dilation then erosion)
+      opening_kernel_size: 1  # Removes noise (erosion then dilation)
+      closing_kernel_size: 7  # Fills gaps (dilation then erosion)
     
     # Edge detection parameters
     edge_detection:
@@ -43,7 +43,7 @@ perception:
       min_area: 80  # Minimum contour area in pixels (filters noise)
       max_area: null  # Maximum contour area (null for no limit)
       min_aspect_ratio: 1.2  # Minimum aspect ratio (length/width) for rope-like shapes
-      hole_fill_max_area: 400  # Fill small holes; larger loop interiors are preserved
+      hole_fill_max_area: null  # Fill small holes; larger loop interiors are preserved
       hollow_fill_ratio_threshold: 0.35  # Skip aspect ratio for hollow (loop-like) contours
 
     cleanup:
@@ -52,17 +52,22 @@ perception:
 
   keypoint_detection:
     endpoint_detection:
-      method: "contour_analysis"
-      min_confidence: 0.7
+      method: "combined" # "contour_analysis", "skeleton_endpoints", or "combined"
+      min_confidence: 0.4
+      merge_distance: 8
     crossing_detection:
       method: "skeleton_intersection"
-      min_confidence: 0.9
+      min_confidence: 0.5
+      min_area: 6
+      min_neighbor_count: 3
+      min_branch_length: 6
+      min_branch_count: 3
     skeletonization:
       method: "zhang_suen"
-      prune_length: 15
-      close_loop_max_gap: 12
+      prune_length: 4
+      close_loop_max_gap: 0
       pre_close_kernel_size: 5
-      pre_dilate_kernel_size: 0
+      pre_dilate_kernel_size: 3
       pre_dilate_iterations: 1
 
   keypoint_mask:
@@ -71,8 +76,8 @@ perception:
 
   skeletonization:
     method: "zhang_suen"  # or "lee", "medial_axis"
-    prune_length: 15  # pixels
-    close_loop_max_gap: 12  # pixels; close tiny gaps to recover loops
+    prune_length: 4  # pixels
+    close_loop_max_gap: 0  # pixels; close tiny gaps to recover loops
     pre_close_kernel_size: 5  # pixels, 0 disables
-    pre_dilate_kernel_size: 0  # pixels, 0 disables
+    pre_dilate_kernel_size: 3  # pixels, 0 disables
     pre_dilate_iterations: 1
