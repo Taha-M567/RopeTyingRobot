@@ -1,0 +1,210 @@
+---
+alwaysApply: true
+---
+
+# ============================================================
+# Project: Rope Tying Robot
+# ============================================================
+# This repository implements a robotic system capable of
+# tying and untying ropes using learning-based manipulation.
+#
+# Core technologies:
+# - LeRobot with SO 100 robots (imitation / RL for manipulation)
+# - OpenCV (rope perception, segmentation, tracking)
+# - Python (primary language)
+# - Potentially will require ROS2 support 
+# The system is expected to evolve from simulation (Isaac Sim)
+# to real hardware with cameras and robot arms.
+# ============================================================
+
+
+# ============================================================
+# GENERAL CODING RULES
+# ============================================================
+
+# Language
+- All code MUST be written in Python unless explicitly stated otherwise.
+- Assume Python >= 3.10.
+
+# Naming
+- ALL variable names MUST use snake_case.
+- Function names MUST use snake_case.
+- Class names MUST use PascalCase.
+- Constants MUST be uppercase with underscores.
+- File names MUST use snake_case.
+
+# Style
+- Follow PEP8 strictly.
+- Max line length: 88 characters.
+- Prefer explicit over implicit behavior.
+- Avoid magic numbers; define named constants.
+- Favor readability over micro-optimizations.
+
+# Typing
+- Use type hints for:
+  - Function arguments
+  - Return values
+  - Public class attributes
+- Use `from typing import Optional, Tuple, List, Dict` when needed.
+
+# Documentation
+- Every module MUST have a top-level docstring.
+- Every public function/class MUST have a docstring describing:
+  - Purpose
+  - Inputs
+  - Outputs
+  - Assumptions or constraints
+
+
+# ============================================================
+# PROJECT ARCHITECTURE RULES
+# ============================================================
+
+# Separation of concerns is mandatory.
+- Perception, control, learning, and evaluation logic MUST NOT be mixed.
+- OpenCV code MUST NOT directly command robot actions.
+- Robot control code MUST NOT directly manipulate image pixels.
+
+# Recommended directory structure:
+#
+# src/
+# ├── perception/        # OpenCV, segmentation, tracking
+# ├── control/           # Robot control, trajectories, policies
+# ├── learning/          # LeRobot datasets, training, evaluation
+# ├── simulation/        # Isaac Sim integration
+# ├── hardware/          # Real camera and robot interfaces
+# ├── utils/             # Shared utilities
+# └── configs/           # YAML/JSON configuration files
+
+
+# ============================================================
+# PERCEPTION (OpenCV) RULES
+# ============================================================
+
+- OpenCV is used for:
+  - Rope segmentation
+  - Keypoint extraction
+  - Skeletonization
+  - State estimation (e.g., crossings, endpoints)
+
+- All perception outputs MUST be:
+  - Well-defined data structures (dataclasses preferred)
+  - Explicitly documented (units, coordinate frames)
+
+- Image processing functions MUST:
+  - Accept numpy arrays as input
+  - Never read from disk internally
+  - Never display images unless explicitly requested
+
+- Camera calibration parameters MUST be loaded from config files.
+
+
+# ============================================================
+# LEROBOT / LEARNING RULES
+# ============================================================
+
+- LeRobot is the primary framework for:
+  - Dataset handling
+  - Policy training
+  - Policy evaluation
+
+- Learning code MUST:
+  - Be reproducible (fixed seeds where applicable)
+  - Log metrics clearly (loss, success rate, episode length)
+  - Separate training and inference paths
+
+- Datasets MUST:
+  - Be versioned
+  - Include metadata (camera setup, robot, environment)
+  - Never be hardcoded in logic
+
+- Policies MUST:
+  - Expose a clean `predict(action)` or equivalent interface
+  - Be callable from both simulation and hardware pipelines
+
+
+# ============================================================
+# SIMULATION RULES (ISAAC SIM)
+# ============================================================
+
+- Simulation code MUST mirror real hardware interfaces.
+- No simulation-only hacks in core logic.
+- Simulation-specific assumptions MUST be clearly documented.
+
+- Coordinate frames MUST be explicitly defined and consistent with:
+  - Camera frame
+  - Robot base frame
+  - World frame
+
+
+# ============================================================
+# ERROR HANDLING & DEBUGGING
+# ============================================================
+
+- NEVER silently fail.
+- Use explicit exceptions with meaningful messages.
+- Assertions are allowed ONLY for invariant checks.
+
+- Logging:
+  - Use the `logging` module (not print)
+  - DEBUG for internal state
+  - INFO for milestones
+  - WARNING/ERROR for failures
+
+
+# ============================================================
+# PERFORMANCE & SAFETY
+# ============================================================
+
+- Real-time constraints MUST be documented.
+- Image processing pipelines SHOULD be benchmarked.
+- Avoid unnecessary copies of large numpy arrays.
+
+- Hardware safety:
+  - All motion commands MUST have bounds checking.
+  - Emergency stop logic MUST be easy to integrate.
+
+
+# ============================================================
+# CONFIGURATION RULES
+# ============================================================
+
+- All tunable parameters MUST live in config files.
+- No hardcoded paths.
+- Use YAML or JSON for configs.
+
+- Config files MUST include:
+  - Clear comments
+  - Units for all numeric values
+
+
+# ============================================================
+# TESTING RULES
+# ============================================================
+
+- Unit tests are REQUIRED for:
+  - Perception utilities
+  - Geometry / rope state logic
+  - Dataset loading
+
+- Tests MUST be deterministic.
+- Use pytest-style tests.
+
+
+# ============================================================
+# CURSOR-SPECIFIC BEHAVIOR
+# ============================================================
+
+When generating or modifying code:
+- Prefer small, composable functions.
+- Avoid speculative features not requested.
+- Do NOT change unrelated files.
+- Explain assumptions briefly in comments when needed.
+
+When unsure:
+- Ask clarifying questions before implementing major changes.
+- Default to correctness and clarity over speed.
+
+# ============================================================
+# END OF RULES
+# ============================================================
