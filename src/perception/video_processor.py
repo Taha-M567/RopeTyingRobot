@@ -171,7 +171,7 @@ class LiveVideoProcessor:
         start_time = time.time()
 
         # Temporary toggles: set to False (or comment out) to restore full pipeline.
-        disable_keypoint_extraction = True
+        disable_keypoint_extraction = False
         disable_skeletonization = False
 
         try:
