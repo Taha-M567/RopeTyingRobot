@@ -91,6 +91,8 @@ def _filter_contours(
     min_area: int = 100,
     max_area: Optional[int] = None,
     min_aspect_ratio: float = 2.0,
+    hole_fill_max_area: Optional[int] = None,
+    hollow_fill_ratio_threshold: Optional[float] = None,
 ) -> np.ndarray:
     """Filter contours to keep only rope-like shapes.
 
@@ -99,6 +101,10 @@ def _filter_contours(
         min_area: Minimum contour area in pixels
         max_area: Maximum contour area in pixels (None for no limit)
         min_aspect_ratio: Minimum aspect ratio (length/width)
+        hole_fill_max_area: Fill holes up to this area (pixels); larger holes
+            (e.g., rope loops) are preserved. None disables hole filling.
+        hollow_fill_ratio_threshold: If set, treat contours with fill ratios
+            below this value as hollow (loop-like) and skip aspect ratio checks.
 
     Returns:
         Filtered binary mask
@@ -113,39 +119,112 @@ def _filter_contours(
     if not contours:
         return mask
 
-    # Filter contours
-    filtered_contours = []
+    # Start from the original mask so holes (e.g., rope loops) are preserved.
+    filtered_mask = mask.copy()
+
     for contour in contours:
         area = cv2.contourArea(contour)
 
         # Check area
         if area < min_area:
+            cv2.drawContours(filtered_mask, [contour], -1, 0, -1)
             continue
         if max_area is not None and area > max_area:
+            cv2.drawContours(filtered_mask, [contour], -1, 0, -1)
             continue
 
-        # Check aspect ratio
-        if len(contour) >= 5:  # Need at least 5 points for fitEllipse
+        is_hollow = False
+        if hollow_fill_ratio_threshold is not None and hollow_fill_ratio_threshold > 0:
+            contour_mask = np.zeros_like(mask, dtype=np.uint8)
+            cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+            contour_area_pixels = int(np.count_nonzero(contour_mask))
+            if contour_area_pixels > 0:
+                rope_area_pixels = int(
+                    np.count_nonzero(cv2.bitwise_and(mask, contour_mask))
+                )
+                fill_ratio = rope_area_pixels / contour_area_pixels
+                is_hollow = fill_ratio < hollow_fill_ratio_threshold
+
+        # Check aspect ratio (skip for hollow/loop-like contours)
+        if not is_hollow and len(contour) >= 5:  # Need at least 5 points for fitEllipse
             try:
-                (x, y), (w, h), angle = cv2.fitEllipse(contour)
+                (_, _), (w, h), _ = cv2.fitEllipse(contour)
                 aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
                 if aspect_ratio < min_aspect_ratio:
-                    continue
+                    cv2.drawContours(filtered_mask, [contour], -1, 0, -1)
             except Exception:
                 # If fitEllipse fails, use bounding box
-                x, y, w, h = cv2.boundingRect(contour)
+                _, _, w, h = cv2.boundingRect(contour)
                 aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
                 if aspect_ratio < min_aspect_ratio:
-                    continue
+                    cv2.drawContours(filtered_mask, [contour], -1, 0, -1)
 
-        filtered_contours.append(contour)
-
-    # Create new mask with filtered contours
-    filtered_mask = np.zeros_like(mask)
-    if filtered_contours:
-        cv2.drawContours(filtered_mask, filtered_contours, -1, 255, -1)
+    if hole_fill_max_area is not None and hole_fill_max_area > 0:
+        # Fill only small holes to reduce skeleton noise while preserving
+        # large loop interiors.
+        holes = cv2.bitwise_not(filtered_mask)
+        hole_contours, _ = cv2.findContours(
+            holes,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        for hole_contour in hole_contours:
+            area = cv2.contourArea(hole_contour)
+            if area <= hole_fill_max_area:
+                cv2.drawContours(filtered_mask, [hole_contour], -1, 255, -1)
 
     return filtered_mask
+
+
+
+
+def _cleanup_connected_components(
+    mask: np.ndarray,
+    min_area: int = 0,
+    keep_largest: bool = False,
+) -> np.ndarray:
+    """Remove small connected components from a binary mask.
+
+    Args:
+        mask: Binary mask (uint8, 0/255)
+        min_area: Minimum area in pixels to keep (0 disables)
+        keep_largest: If True, always keep the largest component
+
+    Returns:
+        Cleaned binary mask (uint8, 0/255)
+    """
+    if mask.size == 0:
+        return mask
+    if min_area <= 0 and not keep_largest:
+        return mask
+
+    binary = (mask > 0).astype(np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        binary,
+        connectivity=8,
+    )
+
+    if num_labels <= 1:
+        return mask
+
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    keep = np.zeros(num_labels, dtype=bool)
+
+    if keep_largest and len(areas) > 0:
+        largest_idx = 1 + int(np.argmax(areas))
+        keep[largest_idx] = True
+
+    if min_area > 0:
+        for label_idx, area in enumerate(areas, start=1):
+            if area >= min_area:
+                keep[label_idx] = True
+
+    cleaned = np.zeros_like(binary)
+    for label_idx in range(1, num_labels):
+        if keep[label_idx]:
+            cleaned[labels == label_idx] = 255
+
+    return cleaned
 
 
 def _calculate_confidence(
@@ -231,6 +310,11 @@ def _segment_by_color(
     contour_filter = config.get("contour_filter", {})
     min_area = contour_filter.get("min_area", 100)
     min_aspect_ratio = contour_filter.get("min_aspect_ratio", 2.0)
+    hole_fill_max_area = contour_filter.get("hole_fill_max_area", None)
+    hollow_fill_ratio_threshold = contour_filter.get(
+        "hollow_fill_ratio_threshold",
+        None,
+    )
 
     # Convert to HSV for better color separation
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -250,7 +334,21 @@ def _segment_by_color(
     mask = _apply_morphology(mask, opening_size, closing_size)
 
     # Filter contours
-    mask = _filter_contours(mask, min_area, None, min_aspect_ratio)
+    mask = _filter_contours(
+        mask,
+        min_area,
+        None,
+        min_aspect_ratio,
+        hole_fill_max_area,
+        hollow_fill_ratio_threshold,
+    )
+
+    cleanup_cfg = config.get("cleanup", {})
+    mask = _cleanup_connected_components(
+        mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
+    )
 
     return mask
 
@@ -278,6 +376,11 @@ def _segment_by_edges(
     contour_filter = config.get("contour_filter", {})
     min_area = contour_filter.get("min_area", 100)
     min_aspect_ratio = contour_filter.get("min_aspect_ratio", 2.0)
+    hole_fill_max_area = contour_filter.get("hole_fill_max_area", None)
+    hollow_fill_ratio_threshold = contour_filter.get(
+        "hollow_fill_ratio_threshold",
+        None,
+    )
 
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -308,7 +411,21 @@ def _segment_by_edges(
         cv2.drawContours(mask, contours, -1, 255, -1)
 
     # Filter contours
-    mask = _filter_contours(mask, min_area, None, min_aspect_ratio)
+    mask = _filter_contours(
+        mask,
+        min_area,
+        None,
+        min_aspect_ratio,
+        hole_fill_max_area,
+        hollow_fill_ratio_threshold,
+    )
+
+    cleanup_cfg = config.get("cleanup", {})
+    mask = _cleanup_connected_components(
+        mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
+    )
 
     return mask
 
@@ -352,6 +469,13 @@ def _segment_combined(
         combined_mask,
         opening_kernel_size=3,
         closing_kernel_size=closing_size,
+    )
+
+    cleanup_cfg = config.get("cleanup", {})
+    combined_mask = _cleanup_connected_components(
+        combined_mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
     )
 
     return combined_mask, agreement

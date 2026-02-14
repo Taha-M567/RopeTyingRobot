@@ -9,7 +9,6 @@ A robotic system capable of tying and untying ropes using learning-based manipul
 - **LeRobot**: Imitation learning and reinforcement learning for manipulation
 - **OpenCV**: Rope perception, segmentation, and tracking
 - **Python**: Primary programming language (Python >= 3.10)
-- **Isaac Sim**: Simulation environment (for development and testing)
 
 ## Project Structure
 
@@ -21,18 +20,6 @@ VIP_Project_W26/
 │   │   ├── keypoint_detection.py   # Endpoint and crossing detection
 │   │   ├── skeletonization.py      # Rope centerline extraction
 │   │   └── state_estimation.py     # Rope state estimation
-│   │
-│   ├── control/             # Robot control and policies
-│   │   ├── trajectory_planner.py  # Motion planning
-│   │   ├── policy_interface.py     # LeRobot policy interface
-│   │   └── robot_controller.py     # Robot control interface
-│   │
-│   ├── learning/            # LeRobot dataset and training
-│   │   ├── dataset.py              # Dataset handling
-│   │   └── trainer.py              # Policy training
-│   │
-│   ├── simulation/          # Isaac Sim integration
-│   │   └── isaac_sim_env.py       # Simulation environment
 │   │
 │   ├── hardware/            # Real hardware interfaces
 │   │   ├── camera.py              # Camera interface
@@ -55,12 +42,6 @@ VIP_Project_W26/
 │   ├── control/            # Control module tests
 │   ├── learning/           # Learning module tests
 │   └── utils/              # Utility tests
-│
-├── data/                   # Data directories
-│   ├── raw/               # Raw data
-│   └── processed/         # Processed datasets
-│
-├── logs/                   # Log files
 │
 ├── requirements.txt        # Python dependencies
 ├── pytest.ini            # Pytest configuration

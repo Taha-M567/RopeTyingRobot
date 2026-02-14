@@ -170,35 +170,54 @@ class LiveVideoProcessor:
         # Process frame through perception pipeline
         start_time = time.time()
 
+        # Pipeline toggles (configurable)
+        pipeline_cfg = self.perception_config.get("pipeline", {})
+        disable_keypoint_extraction = bool(
+            pipeline_cfg.get("disable_keypoint_extraction", False)
+        )
+        disable_skeletonization = bool(
+            pipeline_cfg.get("disable_skeletonization", False)
+        )
+
         try:
             # 1. Segment rope
-            # Apply box filter to reduce noise
-            frame = cv2.boxFilter(frame, -1, (4,4) , normalize=True)
+            # Optional pre-filter to reduce noise (disabled by default).
+            segmentation_config = self.perception_config.get("segmentation", {})
+            box_filter_cfg = segmentation_config.get("pre_box_filter", {})
+            if box_filter_cfg.get("enabled", False):
+                kernel = int(box_filter_cfg.get("kernel_size", 4))
+                kernel = max(1, kernel)
+                frame = cv2.boxFilter(frame, -1, (kernel, kernel), normalize=True)
             rope_mask = segment_rope(
                 frame,
-                config=self.perception_config.get("segmentation"),
+                config=segmentation_config,
             )
 
             # 2. Detect keypoints
-            keypoints = detect_keypoints(
-                rope_mask.mask,
-                config=self.perception_config.get("keypoint_detection", {}),
-            )
-
-            keypoint_mask = create_keypoint_class_mask(
-                rope_mask.mask,
-                keypoints,
-                config=self.perception_config.get("keypoint_mask", {}),
-            )
+            if disable_keypoint_extraction:
+                keypoints = []
+                keypoint_mask = np.zeros_like(rope_mask.mask, dtype=np.uint8)
+            else:
+                keypoints = detect_keypoints(
+                    rope_mask.mask,
+                    config=self.perception_config.get("keypoint_detection", {}),
+                )
+                keypoint_mask = create_keypoint_class_mask(
+                    rope_mask.mask,
+                    keypoints,
+                    config=self.perception_config.get("keypoint_mask", {}),
+                )
 
             # 3. Skeletonize
-            skeleton = skeletonize_rope(
-                rope_mask.mask,
-                config=self.perception_config.get("skeletonization", {}),
-            )
-
-            # 4. Extract path
-            path = extract_path(skeleton)
+            if disable_skeletonization:
+                path = np.array([], dtype=np.float32).reshape(0, 2)
+            else:
+                skeleton = skeletonize_rope(
+                    rope_mask.mask,
+                    config=self.perception_config.get("skeletonization", {}),
+                )
+                # 4. Extract path
+                path = extract_path(skeleton)
 
             # 5. Estimate state
             rope_state = estimate_rope_state(keypoints, path)

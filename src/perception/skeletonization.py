@@ -5,7 +5,7 @@ to a graph-aware structured representation.
 """
 
 import logging
-from typing import List, Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict
 
 import cv2
 import numpy as np
@@ -33,7 +33,8 @@ class PathDict(TypedDict):
 
 BINARY_THRESHOLD = 127
 BINARY_MAX = 255
-DEFAULT_PRUNE_LENGTH = 10
+DEFAULT_PRUNE_LENGTH = 20
+DEFAULT_CLOSE_LOOP_MAX_GAP = 0
 MAX_PRUNE_ITERATIONS = 100
 DEFAULT_PRE_CLOSE_KERNEL_SIZE = 0
 DEFAULT_PRE_DILATE_KERNEL_SIZE = 0
@@ -113,12 +114,15 @@ def _count_neighbors(skeleton: np.ndarray) -> np.ndarray:
 def _postprocess_skeleton(
     skeleton: np.ndarray,
     prune_length: int = DEFAULT_PRUNE_LENGTH,
+    close_loop_max_gap: int = DEFAULT_CLOSE_LOOP_MAX_GAP,
 ) -> np.ndarray:
     """Post-process skeleton: remove isolated pixels and prune short branches.
 
     Args:
         skeleton: Binary skeleton mask (uint8, 0/255)
         prune_length: Minimum branch length to keep (pixels)
+        close_loop_max_gap: If > 0, close small gaps between exactly two
+            endpoints within this pixel distance.
 
     Returns:
         Cleaned skeleton mask (uint8, 0/255)
@@ -235,6 +239,21 @@ def _postprocess_skeleton(
                     skeleton_binary[pr, pc] = 0
                 changed = True
 
+    if close_loop_max_gap > 0:
+        # Recompute endpoints after pruning and close tiny gaps for loops.
+        neighbor_count = _count_neighbors(
+            (skeleton_binary * BINARY_MAX).astype(np.uint8)
+        )
+        endpoints_mask = (neighbor_count == 1) & (skeleton_binary > 0)
+        endpoint_coords = np.column_stack(np.where(endpoints_mask))
+
+        if len(endpoint_coords) == 2:
+            (r1, c1), (r2, c2) = endpoint_coords
+            dr = int(r1) - int(r2)
+            dc = int(c1) - int(c2)
+            if dr * dr + dc * dc <= close_loop_max_gap * close_loop_max_gap:
+                cv2.line(skeleton_binary, (int(c1), int(r1)), (int(c2), int(r2)), 1, 1)
+
     return (skeleton_binary * BINARY_MAX).astype(np.uint8)
 
 
@@ -281,22 +300,25 @@ def _cluster_junctions(skeleton: np.ndarray) -> np.ndarray:
     return np.array(junction_centers, dtype=np.float32)
 
 
-def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarray, List[np.ndarray]]:
+def _extract_graph_structure(
+    skeleton: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, List[np.ndarray], List[Tuple[int, int]]]:
     """Extract graph structure from skeleton (endpoints, junctions, edges).
 
     Args:
         skeleton: Binary skeleton mask (uint8, 0/255)
 
     Returns:
-        Tuple of (endpoints, junctions, edges) where:
+        Tuple of (endpoints, junctions, edges, edge_nodes) where:
         - endpoints: (E, 2) array of (x, y) coordinates
         - junctions: (J, 2) array of (x, y) coordinates
         - edges: List of (Ni, 2) arrays, each representing an edge path
+        - edge_nodes: List of (node_i, node_j) indices for each edge
     """
     if skeleton.size == 0 or np.count_nonzero(skeleton) == 0:
         empty_endpoints = np.array([], dtype=np.float32).reshape(0, 2)
         empty_junctions = np.array([], dtype=np.float32).reshape(0, 2)
-        return empty_endpoints, empty_junctions, []
+        return empty_endpoints, empty_junctions, [], []
 
     neighbor_count = _count_neighbors(skeleton)
     skeleton_binary = (skeleton > BINARY_THRESHOLD).astype(np.uint8)
@@ -305,7 +327,13 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
     endpoints_mask = (neighbor_count == 1) & (skeleton_binary > 0)
     endpoint_coords = np.column_stack(np.where(endpoints_mask))
     # Convert to (x, y) = (col, row)
-    endpoints = np.array([[col, row] for row, col in endpoint_coords], dtype=np.float32)
+    if len(endpoint_coords) == 0:
+        endpoints = np.array([], dtype=np.float32).reshape(0, 2)
+    else:
+        endpoints = np.array(
+            [[col, row] for row, col in endpoint_coords],
+            dtype=np.float32,
+        )
 
     # Get clustered junctions
     junctions = _cluster_junctions(skeleton)
@@ -331,6 +359,7 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
 
     # Extract edges by tracing paths between nodes
     edges = []
+    edge_nodes: List[Tuple[int, int]] = []
     visited_edges = set()
 
     # For each pair of nodes, check if there's a path
@@ -355,6 +384,7 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
                 # Convert path to (x, y) coordinates
                 path_xy = np.array([[col, row] for row, col in path], dtype=np.float32)
                 edges.append(path_xy)
+                edge_nodes.append((i, j))
                 visited_edges.add(edge_key)
 
     # Handle loops (0 endpoints) - extract as closed path
@@ -368,7 +398,114 @@ def _extract_graph_structure(skeleton: np.ndarray) -> Tuple[np.ndarray, np.ndarr
                 path_xy = np.array([[col, row] for row, col in loop_path], dtype=np.float32)
                 edges.append(path_xy)
 
-    return endpoints, junctions, edges
+    return endpoints, junctions, edges, edge_nodes
+
+
+def _build_main_path(
+    endpoints: np.ndarray,
+    junctions: np.ndarray,
+    edges: List[np.ndarray],
+    edge_nodes: List[Tuple[int, int]],
+) -> Optional[np.ndarray]:
+    """Build a main path by finding the longest path through the graph."""
+    if not edges or not edge_nodes:
+        return None
+
+    all_nodes = np.vstack([endpoints, junctions]) if len(junctions) > 0 else endpoints
+    if all_nodes.size == 0:
+        return None
+
+    # Build adjacency with edge lengths as weights.
+    adjacency: Dict[int, List[Tuple[int, int, float]]] = {}
+    for edge_index, (i, j) in enumerate(edge_nodes):
+        length = float(len(edges[edge_index]))
+        adjacency.setdefault(i, []).append((j, edge_index, length))
+        adjacency.setdefault(j, []).append((i, edge_index, length))
+
+    candidate_nodes = list(range(len(all_nodes)))
+    if len(endpoints) >= 2:
+        candidate_nodes = list(range(len(endpoints)))
+
+    # Dijkstra from each candidate node to find the farthest candidate.
+    best_distance = -1.0
+    best_pair = None
+    best_prev: Dict[int, Tuple[int, int]] = {}
+
+    for start in candidate_nodes:
+        # Standard Dijkstra on sparse adjacency.
+        distances = {start: 0.0}
+        prev: Dict[int, Tuple[int, int]] = {}
+        visited = set()
+        queue = [(0.0, start)]
+
+        while queue:
+            dist, node = queue.pop(0)
+            if node in visited:
+                continue
+            visited.add(node)
+
+            for neighbor, edge_index, weight in adjacency.get(node, []):
+                new_dist = dist + weight
+                if neighbor not in distances or new_dist < distances[neighbor]:
+                    distances[neighbor] = new_dist
+                    prev[neighbor] = (node, edge_index)
+                    queue.append((new_dist, neighbor))
+            queue.sort(key=lambda x: x[0])
+
+        for end in candidate_nodes:
+            if end == start or end not in distances:
+                continue
+            if distances[end] > best_distance:
+                best_distance = distances[end]
+                best_pair = (start, end)
+                best_prev = prev
+
+    if best_pair is None:
+        return None
+
+    # Reconstruct node path from best_prev.
+    start, end = best_pair
+    node_path = [end]
+    edge_path = []
+    current = end
+    while current != start:
+        if current not in best_prev:
+            break
+        prev_node, edge_index = best_prev[current]
+        node_path.append(prev_node)
+        edge_path.append(edge_index)
+        current = prev_node
+    node_path.reverse()
+    edge_path.reverse()
+
+    if not edge_path:
+        return None
+
+    # Stitch edge pixel paths in order, aligning orientation to node order.
+    stitched: List[np.ndarray] = []
+    for idx, edge_index in enumerate(edge_path):
+        edge = edges[edge_index]
+        node_idx = node_path[idx]
+        next_node_idx = node_path[idx + 1]
+        node_xy = all_nodes[node_idx]
+        next_node_xy = all_nodes[next_node_idx]
+
+        start_dist = np.linalg.norm(edge[0] - node_xy)
+        end_dist = np.linalg.norm(edge[-1] - node_xy)
+        edge_oriented = edge if start_dist <= end_dist else edge[::-1]
+
+        # Ensure the end aligns with the next node; flip if needed.
+        if np.linalg.norm(edge_oriented[-1] - next_node_xy) > np.linalg.norm(
+            edge_oriented[0] - next_node_xy
+        ):
+            edge_oriented = edge_oriented[::-1]
+
+        if stitched:
+            stitched.append(edge_oriented[1:])  # drop duplicate junction point
+        else:
+            stitched.append(edge_oriented)
+
+    return np.concatenate(stitched, axis=0)
 
 
 def _trace_path_between_nodes(
@@ -489,6 +626,42 @@ def _trace_loop(
     return None
 
 
+def _trace_loop_from_skeleton(
+    skeleton: np.ndarray,
+    max_start_trials: int = 50,
+) -> Optional[List[Tuple[int, int]]]:
+    """Trace a loop path from a skeleton by trying degree-2 start pixels.
+
+    Args:
+        skeleton: Binary skeleton mask (uint8, 0/255)
+        max_start_trials: Maximum number of start points to try
+
+    Returns:
+        Loop path as list of (row, col) coordinates, or None
+    """
+    if skeleton.size == 0 or np.count_nonzero(skeleton) == 0:
+        return None
+
+    skeleton_binary = (skeleton > BINARY_THRESHOLD).astype(np.uint8)
+    neighbor_count = _count_neighbors((skeleton_binary * BINARY_MAX).astype(np.uint8))
+
+    # Prefer degree-2 pixels for loop tracing; fallback to any skeleton pixel.
+    degree_two = np.column_stack(
+        np.where((neighbor_count == 2) & (skeleton_binary > 0))
+    )
+    candidates = degree_two
+    if len(candidates) == 0:
+        candidates = np.column_stack(np.where(skeleton_binary > 0))
+
+    for idx in range(min(max_start_trials, len(candidates))):
+        row, col = candidates[idx]
+        loop = _trace_loop(skeleton_binary, (int(row), int(col)))
+        if loop is not None and len(loop) > 2:
+            return loop
+
+    return None
+
+
 def skeletonize_rope(
     mask: np.ndarray,
     config: Optional[dict] = None,
@@ -500,6 +673,8 @@ def skeletonize_rope(
         config: Optional configuration dictionary with:
             - method: "zhang_suen" (default)
             - prune_length: int, pixels to prune (default: 10)
+            - close_loop_max_gap: int, max pixel gap to close between
+              exactly two endpoints (default: 0 = disabled)
             - pre_close_kernel_size: int, closing kernel size before thinning
             - pre_dilate_kernel_size: int, dilation kernel size before thinning
             - pre_dilate_iterations: int, dilation iterations
@@ -532,6 +707,9 @@ def skeletonize_rope(
 
     method = config.get("method", "zhang_suen")
     prune_length = config.get("prune_length", DEFAULT_PRUNE_LENGTH)
+    close_loop_max_gap = int(
+        config.get("close_loop_max_gap", DEFAULT_CLOSE_LOOP_MAX_GAP)
+    )
     pre_close_kernel_size = int(
         config.get("pre_close_kernel_size", DEFAULT_PRE_CLOSE_KERNEL_SIZE)
     )
@@ -569,7 +747,11 @@ def skeletonize_rope(
 
     # Post-processing
     try:
-        skeleton = _postprocess_skeleton(skeleton, prune_length=prune_length)
+        skeleton = _postprocess_skeleton(
+            skeleton,
+            prune_length=prune_length,
+            close_loop_max_gap=close_loop_max_gap,
+        )
     except Exception as e:
         logger.warning(f"Post-processing failed: {e}, returning unprocessed skeleton")
 
@@ -609,15 +791,26 @@ def extract_path(skeleton: np.ndarray) -> PathDict:
 
     try:
         # Extract graph structure
-        endpoints, junctions, edges = _extract_graph_structure(skeleton)
+        endpoints, junctions, edges, edge_nodes = _extract_graph_structure(skeleton)
 
-        # Determine if simple chain (2 endpoints, 0 junctions)
-        if len(endpoints) == 2 and len(junctions) == 0 and len(edges) > 0:
-            # Use the longest edge as main_path
-            longest_edge = max(edges, key=len)
-            main_path = longest_edge
-        else:
-            main_path = None
+        # Determine a main path even with junctions by finding the longest graph path.
+        main_path = _build_main_path(endpoints, junctions, edges, edge_nodes)
+
+        # If the main path is missing or too short, try to recover a full loop
+        # directly from the skeleton.
+        skeleton_count = int(np.count_nonzero(skeleton))
+        if skeleton_count > 0:
+            main_path_len = 0 if main_path is None else len(main_path)
+            if len(endpoints) == 0 or main_path_len < int(0.7 * skeleton_count):
+                loop_path = _trace_loop_from_skeleton(skeleton)
+                if loop_path is not None:
+                    loop_xy = np.array(
+                        [[col, row] for row, col in loop_path], dtype=np.float32
+                    )
+                    if main_path is None or len(loop_xy) > len(main_path):
+                        main_path = loop_xy
+                        if not edges:
+                            edges = [loop_xy]
 
         # Handle single pixel case
         if len(endpoints) == 1 and len(junctions) == 0 and len(edges) == 0:

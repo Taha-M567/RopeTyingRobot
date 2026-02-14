@@ -2,7 +2,7 @@
 # Units: pixels for image_size, mm for focal_length
 
 camera:
-  device_id: 0
+  device_id: 1
   image_size:
     width: 480  # pixels
     height: 640  # pixels

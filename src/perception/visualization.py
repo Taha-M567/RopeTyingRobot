@@ -20,7 +20,7 @@ from src.perception.video_processor import ProcessingResult
 def draw_rope_mask(
     image: np.ndarray,
     mask: RopeMask,
-    alpha: float = 0.5,
+    alpha: float = 0.2,
 ) -> np.ndarray:
     """Draw rope mask overlay on image.
 
@@ -32,12 +32,14 @@ def draw_rope_mask(
     Returns:
         Image with mask overlay
     """
-    overlay = image.copy()
     mask_colored = cv2.applyColorMap(mask.mask, cv2.COLORMAP_JET)
     mask_colored = cv2.bitwise_and(mask_colored, mask_colored, mask=mask.mask)
 
-    # Blend mask with original image
-    result = cv2.addWeighted(overlay, 1.0 - alpha, mask_colored, alpha, 0)
+    # Blend only where the rope mask exists to avoid darkening the background.
+    blended = cv2.addWeighted(image, 1.0 - alpha, mask_colored, alpha, 0)
+    result = image.copy()
+    rope_region = mask.mask > 0
+    result[rope_region] = blended[rope_region]
     return result
 
 
@@ -71,11 +73,14 @@ def draw_keypoint_mask_overlay(
     color_mask[class_mask == CROSSING_CLASS] = crossing_color
 
     # Only blend where we have rope pixels
-    mask_region = (class_mask != BACKGROUND_CLASS).astype(np.uint8) * 255
-    mask_region = cv2.cvtColor(mask_region, cv2.COLOR_GRAY2BGR)
-    overlay = cv2.bitwise_and(color_mask, mask_region)
+    mask_region = (class_mask != BACKGROUND_CLASS)
+    overlay = np.zeros_like(image, dtype=np.uint8)
+    overlay[mask_region] = color_mask[mask_region]
 
-    return cv2.addWeighted(image, 1.0 - alpha, overlay, alpha, 0)
+    blended = cv2.addWeighted(image, 1.0 - alpha, overlay, alpha, 0)
+    result = image.copy()
+    result[mask_region] = blended[mask_region]
+    return result
 
 
 def draw_rope_path(
@@ -112,6 +117,40 @@ def draw_rope_path(
     return result
 
 
+def draw_rope_edges(
+    image: np.ndarray,
+    edges: list[np.ndarray],
+    color: tuple = (255, 0, 0),
+    thickness: int = 2,
+) -> np.ndarray:
+    """Draw rope edges (graph paths) on image.
+
+    Args:
+        image: Image to draw on (BGR format)
+        edges: List of (N, 2) arrays, each an edge path
+        color: Path color (BGR tuple)
+        thickness: Line thickness
+
+    Returns:
+        Image with edge paths drawn
+    """
+    result = image.copy()
+
+    if not edges:
+        return result
+
+    for edge in edges:
+        if edge is None or len(edge) < 2:
+            continue
+        points = edge.astype(np.int32)
+        for i in range(len(points) - 1):
+            pt1 = tuple(points[i])
+            pt2 = tuple(points[i + 1])
+            cv2.line(result, pt1, pt2, color, thickness)
+
+    return result
+
+
 def visualize_result(
     result: ProcessingResult,
     show_mask: bool = True,
@@ -134,8 +173,12 @@ def visualize_result(
     if show_mask:
         vis_image = draw_rope_mask(vis_image, result.rope_mask)
 
-    if show_path and len(result.rope_state.path) > 0:
-        vis_image = draw_rope_path(vis_image, result.rope_state.path)
+    if show_path:
+        path_graph = getattr(result.rope_state, "path_graph", None)
+        if path_graph is not None and len(path_graph.get("edges", [])) > 0:
+            vis_image = draw_rope_edges(vis_image, path_graph["edges"])
+        elif len(result.rope_state.path) > 0:
+            vis_image = draw_rope_path(vis_image, result.rope_state.path)
 
     if show_keypoints:
         vis_image = draw_keypoint_mask_overlay(

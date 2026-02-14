@@ -4,7 +4,7 @@ This module estimates the current state of the rope from perception data.
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -21,12 +21,14 @@ class RopeState:
         crossings: List of crossing positions
         knots: List of knot positions
         path: Ordered path of rope centerline (main_path from skeletonization)
+        path_graph: Optional graph representation from skeletonization
     """
 
     endpoints: List[Tuple[float, float]]
     crossings: List[Tuple[float, float]]
     knots: List[Tuple[float, float]]
     path: np.ndarray
+    path_graph: Optional[PathDict] = None
 
 
 def estimate_rope_state(
@@ -61,9 +63,11 @@ def estimate_rope_state(
         if kp.keypoint_type == "knot"
     ]
 
+    path_graph: Optional[PathDict] = None
     # Extract path from new dictionary format or use legacy array
     if isinstance(path, dict):
         # New format: extract main_path if available
+        path_graph = path
         if path.get("main_path") is not None:
             path_array = path["main_path"]
         elif len(path.get("edges", [])) > 0:
@@ -82,4 +86,5 @@ def estimate_rope_state(
         crossings=crossings,
         knots=knots,
         path=path_array,
+        path_graph=path_graph,
     )
