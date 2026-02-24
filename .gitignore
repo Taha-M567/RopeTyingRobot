@@ -220,6 +220,7 @@ checkpoints/
 
 # Isaac Sim cache
 .isaac_sim_cache/
+**/.kit_runtime/
 
 # LeRobot cache
 .lerobot_cache/

@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\" -c \"import sys; print\\(sys.version\\); print\\(sys.executable\\)\")",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\":*)",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\" -m pip show isaacsim isaaclab)",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\" -m pip show isaaclab-assets isaaclab-tasks rsl-rl opencv-python scikit-image)",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\" -m pip check)",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\" -m pip show RopeUntyingRobot)",
+      "WebSearch",
+      "WebFetch(domain:docs.isaacsim.omniverse.nvidia.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(python -c:*)",
+      "Bash(where:*)",
+      "Bash(conda env list:*)",
+      "Bash(cmd /c \"conda activate isaaclab && python -c \"\"import isaaclab; print\\(isaaclab.__file__\\)\"\"\")",
+      "Bash(cmd /c \"where /r C:\\\\Users\\\\Taha\\\\anaconda3 isaaclab\")",
+      "Bash(cmd:*)",
+      "Bash(cmd /c:*)",
+      "Bash(\"H:/Hard_Repos/isaacsim/env_isaaclab/Scripts/python.exe\" -c \"import isaaclab; print\\(isaaclab.__path__\\)\")",
+      "Bash(pip show:*)",
+      "WebFetch(domain:isaac-sim.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python:*)"
+    ]
+  }
+}

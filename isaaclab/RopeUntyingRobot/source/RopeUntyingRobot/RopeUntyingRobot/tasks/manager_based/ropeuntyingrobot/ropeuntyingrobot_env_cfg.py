@@ -1,12 +1,14 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
+"""Environment configuration for the RopeReach-SO100 task.
 
-import math
+Phase 1: Move the SO-100 end-effector to the rope centre-of-mass.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import AssetBaseCfg, DeformableObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -15,166 +17,354 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.utils import configclass
 
 from . import mdp
 
-##
-# Pre-defined configs
-##
+# ---------------------------------------------------------------------------
+# Asset path resolution — the SO-100 config lives in the assets/ directory
+# two levels above the extension source root.
+# ---------------------------------------------------------------------------
+_ASSET_DIR = (
+    Path(__file__).resolve().parents[6] / "assets"
+)
 
-from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
+# Lazy import: so100_config sits in the assets directory alongside the URDF.
+import sys as _sys
+
+if str(_ASSET_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_ASSET_DIR))
+
+from so100_config import create_so100_rl_articulation_cfg  # noqa: E402
 
 
-##
-# Scene definition
-##
+def _build_so100_cfg():
+    """Build the SO-100 ArticulationCfg with RL actuator split."""
+    return create_so100_rl_articulation_cfg(asset_dir=_ASSET_DIR)
+
+
+# ============================================================================
+# Scene
+# ============================================================================
 
 
 @configclass
-class RopeuntyingrobotSceneCfg(InteractiveSceneCfg):
-    """Configuration for a cart-pole scene."""
+class RopeReachSceneCfg(InteractiveSceneCfg):
+    """SO-100 arm + table + deformable rope scene."""
 
-    # ground plane
+    # -- ground --
     ground = AssetBaseCfg(
-        prim_path="/World/ground",
-        spawn=sim_utils.GroundPlaneCfg(size=(100.0, 100.0)),
+        prim_path="/World/GroundPlane",
+        spawn=sim_utils.CuboidCfg(
+            size=(4.0, 4.0, 0.05),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.18, 0.18, 0.18),
+                roughness=0.9,
+            ),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.025)),
     )
 
-    # robot
-    robot: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    # -- table --
+    table = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Table",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.6, 0.4, 0.02),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.45, 0.35, 0.25),
+                roughness=0.8,
+            ),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.25, 0.0, 0.0)),
+    )
 
-    # lights
+    # -- deformable rope --
+    rope = DeformableObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Rope",
+        spawn=sim_utils.MeshCylinderCfg(
+            radius=0.005,
+            height=0.30,
+            axis="X",
+            deformable_props=sim_utils.DeformableBodyPropertiesCfg(
+                self_collision=True,
+                solver_position_iteration_count=16,
+                vertex_velocity_damping=0.01,
+                simulation_hexahedral_resolution=6,
+            ),
+            physics_material=sim_utils.DeformableBodyMaterialCfg(
+                density=500.0,
+                youngs_modulus=50000.0,
+                poissons_ratio=0.45,
+            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.9, 0.9, 0.85),
+                roughness=0.6,
+            ),
+        ),
+        init_state=DeformableObjectCfg.InitialStateCfg(
+            pos=(0.25, 0.0, 0.05),
+        ),
+    )
+
+    # -- SO-100 robot --
+    robot = _build_so100_cfg().replace(
+        prim_path="{ENV_REGEX_NS}/Robot",
+    )
+
+    # -- end-effector frame tracker --
+    ee_frame = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base",
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(
+                prim_path="{ENV_REGEX_NS}/Robot/gripper",
+                name="ee",
+            ),
+        ],
+        debug_vis=False,
+    )
+
+    # -- lighting --
     dome_light = AssetBaseCfg(
-        prim_path="/World/DomeLight",
-        spawn=sim_utils.DomeLightCfg(color=(0.9, 0.9, 0.9), intensity=500.0),
+        prim_path="/World/Light",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=3000.0,
+            color=(0.85, 0.85, 0.85),
+        ),
     )
 
 
-##
-# MDP settings
-##
+# ============================================================================
+# MDP — Actions
+# ============================================================================
 
 
 @configclass
 class ActionsCfg:
-    """Action specifications for the MDP."""
+    """5-DOF joint position control on the arm. Gripper stays open."""
 
-    joint_effort = mdp.JointEffortActionCfg(asset_name="robot", joint_names=["slider_to_cart"], scale=100.0)
+    arm_action = mdp.JointPositionActionCfg(
+        asset_name="robot",
+        joint_names=[
+            "shoulder_pan",
+            "shoulder_lift",
+            "elbow_flex",
+            "wrist_flex",
+            "wrist_roll",
+        ],
+        scale=0.5,
+        use_default_offset=True,
+    )
+
+
+# ============================================================================
+# MDP — Observations (21-D)
+# ============================================================================
 
 
 @configclass
 class ObservationsCfg:
-    """Observation specifications for the MDP."""
+    """Observation specification for the reaching task."""
 
     @configclass
     class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
+        """Observations fed to the policy network."""
 
-        # observation terms (order preserved)
-        joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel)
+        # -- joint state (5 + 5) --
+        joint_pos_rel = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "shoulder_pan",
+                        "shoulder_lift",
+                        "elbow_flex",
+                        "wrist_flex",
+                        "wrist_roll",
+                    ],
+                ),
+            },
+        )
+        joint_vel_rel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "shoulder_pan",
+                        "shoulder_lift",
+                        "elbow_flex",
+                        "wrist_flex",
+                        "wrist_roll",
+                    ],
+                ),
+            },
+        )
+
+        # -- rope COM in world frame (3) --
+        rope_com = ObsTerm(func=mdp.rope_com_pos)
+
+        # -- EE position in world frame (3) --
+        ee_pos = ObsTerm(func=mdp.ee_pos_w)
+
+        # -- last action (5) --
+        last_action = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self) -> None:
             self.enable_corruption = False
             self.concatenate_terms = True
 
-    # observation groups
     policy: PolicyCfg = PolicyCfg()
+
+
+# ============================================================================
+# MDP — Events (resets)
+# ============================================================================
 
 
 @configclass
 class EventCfg:
-    """Configuration for events."""
+    """Reset events for robot joints and rope position."""
 
-    # reset
-    reset_cart_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
+    reset_arm_joints = EventTerm(
+        func=mdp.reset_joints_by_scale,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"]),
-            "position_range": (-1.0, 1.0),
-            "velocity_range": (-0.5, 0.5),
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[
+                    "shoulder_pan",
+                    "shoulder_lift",
+                    "elbow_flex",
+                    "wrist_flex",
+                    "wrist_roll",
+                ],
+            ),
+            "position_range": (0.8, 1.2),
+            "velocity_range": (0.0, 0.0),
         },
     )
 
-    reset_pole_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
+    reset_rope = EventTerm(
+        func=mdp.reset_nodal_state_uniform,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"]),
-            "position_range": (-0.25 * math.pi, 0.25 * math.pi),
-            "velocity_range": (-0.25 * math.pi, 0.25 * math.pi),
+            "asset_cfg": SceneEntityCfg("rope"),
+            "position_range": {
+                "x": (-0.05, 0.05),
+                "y": (-0.05, 0.05),
+                "z": (0.0, 0.0),
+            },
+            "velocity_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (0.0, 0.0),
+            },
         },
     )
+
+
+# ============================================================================
+# MDP — Rewards
+# ============================================================================
 
 
 @configclass
 class RewardsCfg:
-    """Reward terms for the MDP."""
+    """Reward terms for the reaching task."""
 
-    # (1) Constant running reward
-    alive = RewTerm(func=mdp.is_alive, weight=1.0)
-    # (2) Failure penalty
-    terminating = RewTerm(func=mdp.is_terminated, weight=-2.0)
-    # (3) Primary task: keep pole upright
-    pole_pos = RewTerm(
-        func=mdp.joint_pos_target_l2,
-        weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"]), "target": 0.0},
+    # Dense reaching reward
+    reaching_rope = RewTerm(
+        func=mdp.reaching_rope,
+        weight=1.0,
+        params={"sigma": 0.1},
     )
-    # (4) Shaping tasks: lower cart velocity
-    cart_vel = RewTerm(
-        func=mdp.joint_vel_l1,
+
+    # Binary bonus for being close
+    close_to_rope = RewTerm(
+        func=mdp.close_to_rope,
+        weight=5.0,
+        params={"threshold": 0.02},
+    )
+
+    # Regularisation: smooth actions
+    action_rate = RewTerm(
+        func=mdp.action_rate_l2,
         weight=-0.01,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"])},
     )
-    # (5) Shaping tasks: lower pole angular velocity
-    pole_vel = RewTerm(
+
+    # Regularisation: low joint velocities
+    joint_vel = RewTerm(
         func=mdp.joint_vel_l1,
-        weight=-0.005,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"])},
+        weight=-0.001,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[
+                    "shoulder_pan",
+                    "shoulder_lift",
+                    "elbow_flex",
+                    "wrist_flex",
+                    "wrist_roll",
+                ],
+            ),
+        },
     )
+
+
+# ============================================================================
+# MDP — Terminations
+# ============================================================================
 
 
 @configclass
 class TerminationsCfg:
-    """Termination terms for the MDP."""
+    """Termination conditions."""
 
-    # (1) Time out
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    # (2) Cart out of bounds
-    cart_out_of_bounds = DoneTerm(
-        func=mdp.joint_pos_out_of_manual_limit,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"]), "bounds": (-3.0, 3.0)},
+
+    rope_fell = DoneTerm(
+        func=mdp.rope_below_height,
+        params={"min_height": -0.05},
     )
 
 
-##
-# Environment configuration
-##
+# ============================================================================
+# Full environment config
+# ============================================================================
 
 
 @configclass
-class RopeuntyingrobotEnvCfg(ManagerBasedRLEnvCfg):
-    # Scene settings
-    scene: RopeuntyingrobotSceneCfg = RopeuntyingrobotSceneCfg(num_envs=4096, env_spacing=4.0)
-    # Basic settings
+class RopeReachEnvCfg(ManagerBasedRLEnvCfg):
+    """RopeReach-SO100-v0: move the gripper to the rope COM."""
+
+    scene: RopeReachSceneCfg = RopeReachSceneCfg(
+        num_envs=64,
+        env_spacing=2.5,
+        replicate_physics=False,
+    )
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     events: EventCfg = EventCfg()
-    # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
 
-    # Post initialization
     def __post_init__(self) -> None:
         """Post initialization."""
-        # general settings
-        self.decimation = 2
-        self.episode_length_s = 5
-        # viewer settings
-        self.viewer.eye = (8.0, 0.0, 5.0)
-        # simulation settings
-        self.sim.dt = 1 / 120
+        # Simulation at 120 Hz, control at 30 Hz (decimation=4)
+        self.decimation = 4
+        self.episode_length_s = 10.0
+        self.viewer.eye = (1.0, 1.0, 0.8)
+        self.viewer.lookat = (0.25, 0.0, 0.1)
+        self.sim.dt = 1.0 / 120.0
         self.sim.render_interval = self.decimation
+        self.sim.physx.bounce_threshold_velocity = 0.2
