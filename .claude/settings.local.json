@@ -24,7 +24,8 @@
       "WebFetch(domain:isaac-sim.github.io)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(python:*)",
-      "Bash(ls -la \"H:\\\\Hard_Repos\\\\RopeUntyingRobot\"\" | grep -v \"^d \")"
+      "Bash(ls -la \"H:\\\\Hard_Repos\\\\RopeUntyingRobot\"\" | grep -v \"^d \")",
+      "Bash(git:*)"
     ]
   }
 }

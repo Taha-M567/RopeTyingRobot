@@ -257,20 +257,17 @@ class EventCfg:
     )
 
     reset_rope = EventTerm(
-        func=mdp.reset_nodal_state_uniform,
+        func=mdp.reset_rope_randomized,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("rope"),
-            "position_range": {
+            "position_offset_range": {
                 "x": (-0.05, 0.05),
                 "y": (-0.05, 0.05),
                 "z": (0.0, 0.0),
             },
-            "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-            },
+            "rotation_range": (0.0, 6.283185307),
+            "per_node_noise_std": 0.01,
         },
     )
 
