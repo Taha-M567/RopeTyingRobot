@@ -74,7 +74,7 @@ class RopeReachSceneCfg(InteractiveSceneCfg):
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
         spawn=sim_utils.CuboidCfg(
-            size=(0.6, 0.4, 0.02),
+            size=(0.6, 0.4, 0.06),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled=True,
             ),
@@ -84,30 +84,32 @@ class RopeReachSceneCfg(InteractiveSceneCfg):
                 roughness=0.8,
             ),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.25, 0.0, 0.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.25, 0.0, -0.02)),
     )
 
     # -- deformable rope --
     rope = DeformableObjectCfg(
         prim_path="{ENV_REGEX_NS}/Rope",
         spawn=sim_utils.MeshCylinderCfg(
-            radius=0.005,
-            height=0.30,
+            radius=0.00175,
+            height=0.45,
             axis="X",
             deformable_props=sim_utils.DeformableBodyPropertiesCfg(
                 self_collision=True,
-                solver_position_iteration_count=16,
-                vertex_velocity_damping=0.01,
-                simulation_hexahedral_resolution=6,
+                solver_position_iteration_count=32,
+                vertex_velocity_damping=0.05,
+                simulation_hexahedral_resolution=10,
+                contact_offset=0.005,
+                rest_offset=0.0,
             ),
             physics_material=sim_utils.DeformableBodyMaterialCfg(
-                density=500.0,
-                youngs_modulus=50000.0,
-                poissons_ratio=0.45,
+                density=700.0,
+                youngs_modulus=2000000.0,
+                poissons_ratio=0.40,
             ),
             visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.9, 0.9, 0.85),
-                roughness=0.6,
+                diffuse_color=(1.0, 1.0, 1.0),
+                roughness=0.7,
             ),
         ),
         init_state=DeformableObjectCfg.InitialStateCfg(
