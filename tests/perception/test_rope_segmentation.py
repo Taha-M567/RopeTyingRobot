@@ -1,5 +1,6 @@
 """Tests for rope segmentation module."""
 
+import cv2
 import numpy as np
 import pytest
 
@@ -16,6 +17,49 @@ def test_segment_rope_valid_image():
     assert isinstance(result, RopeMask)
     assert result.mask.shape == (100, 100)
     assert 0.0 <= result.confidence <= 1.0
+
+
+def test_segment_rope_saturation_method():
+    """Test saturation-based segmentation with a colored line on dark bg."""
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    # Draw a bright saturated green line (BGR)
+    cv2.line(image, (10, 50), (90, 50), (0, 255, 0), 4)
+
+    config = {
+        "method": "saturation",
+        "saturation_range": {"min_saturation": 50, "min_value": 50},
+        "morph_operations": {
+            "opening_kernel_size": 1,
+            "closing_kernel_size": 3,
+        },
+        "contour_filter": {
+            "min_area": 10,
+            "min_aspect_ratio": 1.0,
+        },
+        "cleanup": {"min_area": 0, "keep_largest": False},
+    }
+
+    result = segment_rope(image, config=config)
+    assert isinstance(result, RopeMask)
+    assert result.mask.shape == (100, 100)
+    # The green line should produce some rope pixels
+    assert np.count_nonzero(result.mask) > 0
+
+
+def test_segment_rope_saturation_ignores_dark_bg():
+    """Saturation method should not segment a dark/gray background."""
+    # Uniform dark gray image — no saturated pixels
+    image = np.full((100, 100, 3), 60, dtype=np.uint8)
+
+    config = {
+        "method": "saturation",
+        "saturation_range": {"min_saturation": 60, "min_value": 50},
+        "contour_filter": {"min_area": 10, "min_aspect_ratio": 1.0},
+        "cleanup": {"min_area": 0, "keep_largest": False},
+    }
+
+    result = segment_rope(image, config=config)
+    assert np.count_nonzero(result.mask) == 0
 
 
 def test_segment_rope_invalid_image():

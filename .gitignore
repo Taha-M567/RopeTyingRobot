@@ -224,3 +224,6 @@ checkpoints/
 
 # LeRobot cache
 .lerobot_cache/
+
+# Claude Code
+.claude/

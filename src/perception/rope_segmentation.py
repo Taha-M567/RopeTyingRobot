@@ -289,6 +289,69 @@ def _calculate_confidence(
     return min(1.0, max(0.0, base_confidence))
 
 
+def _segment_by_saturation(
+    image: np.ndarray,
+    config: dict,
+) -> np.ndarray:
+    """Segment rope using saturation-based thresholding.
+
+    All gradient rope colors (green, yellow, pink, blue) have high
+    saturation while the dark/neutral background has low saturation.
+
+    Args:
+        image: Input image in BGR format
+        config: Configuration dictionary with segmentation parameters
+
+    Returns:
+        Binary mask of segmented rope
+    """
+    blur_kernel_size = config.get("blur_kernel_size", 5)
+    morph_ops = config.get("morph_operations", {})
+    opening_size = morph_ops.get("opening_kernel_size", 3)
+    closing_size = morph_ops.get("closing_kernel_size", 5)
+    contour_filter = config.get("contour_filter", {})
+    min_area = contour_filter.get("min_area", 100)
+    min_aspect_ratio = contour_filter.get("min_aspect_ratio", 2.0)
+    hole_fill_max_area = contour_filter.get("hole_fill_max_area", None)
+    hollow_fill_ratio_threshold = contour_filter.get(
+        "hollow_fill_ratio_threshold",
+        None,
+    )
+
+    sat_range = config.get("saturation_range", {})
+    min_saturation = sat_range.get("min_saturation", 60)
+    min_value = sat_range.get("min_value", 50)
+
+    # Blur in BGR space first to avoid HSV hue wrap-around artifacts
+    # at gradient color transitions, then convert to HSV.
+    blurred_bgr = _preprocess_image(image, blur_kernel_size)
+    hsv = cv2.cvtColor(blurred_bgr, cv2.COLOR_BGR2HSV)
+
+    lower = np.array([0, min_saturation, min_value])
+    upper = np.array([180, 255, 255])
+    mask = cv2.inRange(hsv, lower, upper)
+
+    mask = _apply_morphology(mask, opening_size, closing_size)
+
+    mask = _filter_contours(
+        mask,
+        min_area,
+        None,
+        min_aspect_ratio,
+        hole_fill_max_area,
+        hollow_fill_ratio_threshold,
+    )
+
+    cleanup_cfg = config.get("cleanup", {})
+    mask = _cleanup_connected_components(
+        mask,
+        min_area=int(cleanup_cfg.get("min_area", 0) or 0),
+        keep_largest=bool(cleanup_cfg.get("keep_largest", False)),
+    )
+
+    return mask
+
+
 def _segment_by_color(
     image: np.ndarray,
     config: dict,
@@ -514,7 +577,9 @@ def segment_rope(
     # Dispatch to appropriate method
     method_agreement = None
 
-    if method == "color_threshold":
+    if method == "saturation":
+        mask = _segment_by_saturation(image, config)
+    elif method == "color_threshold":
         mask = _segment_by_color(image, config)
     elif method == "edge_detection":
         mask = _segment_by_edges(image, config)
@@ -525,8 +590,8 @@ def segment_rope(
         # For now, fall back to color thresholding
         mask = _segment_by_color(image, config)
     else:
-        # Unknown method, default to color thresholding
-        mask = _segment_by_color(image, config)
+        # Unknown method, default to saturation
+        mask = _segment_by_saturation(image, config)
 
     # Calculate confidence
     confidence = _calculate_confidence(mask, image_shape, method_agreement)

@@ -4,6 +4,10 @@ This module provides functions to visualize rope perception results.
 Note: Display functions are only called when explicitly requested.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import cv2
 import numpy as np
 
@@ -15,6 +19,9 @@ from src.perception.keypoint_mask import (
 )
 from src.perception.rope_segmentation import RopeMask
 from src.perception.video_processor import ProcessingResult
+
+if TYPE_CHECKING:
+    from src.perception.crossing_analysis import CrossingInfo
 
 
 def draw_rope_mask(
@@ -151,6 +158,73 @@ def draw_rope_edges(
     return result
 
 
+def draw_crossing_over_under(
+    image: np.ndarray,
+    crossing_details: list[CrossingInfo],
+    over_color: tuple[int, int, int] = (0, 255, 0),
+    under_color: tuple[int, int, int] = (0, 0, 255),
+    radius: int = 14,
+    thickness: int = 2,
+) -> np.ndarray:
+    """Draw over/under indicators at each crossing.
+
+    Args:
+        image: Image to draw on (BGR format).
+        crossing_details: List of ``CrossingInfo`` objects.
+        over_color: BGR color for the over (top) strand indicator.
+        under_color: BGR color for the under (bottom) strand indicator.
+        radius: Radius of the indicator circle.
+        thickness: Thickness of drawn shapes.
+
+    Returns:
+        Image with crossing indicators drawn.
+    """
+    result = image.copy()
+    for ci in crossing_details:
+        cx, cy = int(round(ci.position[0])), int(round(ci.position[1]))
+
+        # Outer circle — over strand color
+        cv2.circle(result, (cx, cy), radius, over_color, thickness)
+        # Inner circle — under strand color
+        cv2.circle(
+            result, (cx, cy), max(1, radius // 2), under_color, thickness
+        )
+
+        # "O" for over label
+        cv2.putText(
+            result,
+            "O",
+            (cx + radius + 2, cy - 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            over_color,
+            1,
+        )
+        # "U" for under label
+        cv2.putText(
+            result,
+            "U",
+            (cx + radius + 2, cy + 12),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            under_color,
+            1,
+        )
+
+        # Confidence text
+        cv2.putText(
+            result,
+            f"{ci.confidence:.2f}",
+            (cx - radius, cy + radius + 12),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.3,
+            (255, 255, 255),
+            1,
+        )
+
+    return result
+
+
 def visualize_result(
     result: ProcessingResult,
     show_mask: bool = True,
@@ -185,6 +259,11 @@ def visualize_result(
             vis_image,
             result.keypoint_mask,
         )
+
+    # Draw crossing over/under indicators
+    crossing_details = getattr(result.rope_state, "crossing_details", [])
+    if crossing_details:
+        vis_image = draw_crossing_over_under(vis_image, crossing_details)
 
     # Add processing info text
     info_text = (

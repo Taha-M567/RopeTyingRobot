@@ -3,13 +3,18 @@
 This module estimates the current state of the rope from perception data.
 """
 
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import numpy as np
 
 from src.perception.keypoint_detection import Keypoint
 from src.perception.skeletonization import PathDict
+
+if TYPE_CHECKING:
+    from src.perception.crossing_analysis import CrossingInfo
 
 
 @dataclass
@@ -22,6 +27,7 @@ class RopeState:
         knots: List of knot positions
         path: Ordered path of rope centerline (main_path from skeletonization)
         path_graph: Optional graph representation from skeletonization
+        crossing_details: Over/under info for each crossing, if available
     """
 
     endpoints: List[Tuple[float, float]]
@@ -29,6 +35,9 @@ class RopeState:
     knots: List[Tuple[float, float]]
     path: np.ndarray
     path_graph: Optional[PathDict] = None
+    crossing_details: list[CrossingInfo] = field(
+        default_factory=list
+    )
 
 
 def estimate_rope_state(
@@ -81,10 +90,17 @@ def estimate_rope_state(
         # Legacy format: use array directly
         path_array = path
 
+    crossing_details = [
+        kp.crossing_info
+        for kp in keypoints
+        if kp.keypoint_type == "crossing" and kp.crossing_info is not None
+    ]
+
     return RopeState(
         endpoints=endpoints,
         crossings=crossings,
         knots=knots,
         path=path_array,
         path_graph=path_graph,
+        crossing_details=crossing_details,
     )

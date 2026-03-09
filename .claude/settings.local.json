@@ -25,7 +25,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(python:*)",
       "Bash(ls -la \"H:\\\\Hard_Repos\\\\RopeUntyingRobot\"\" | grep -v \"^d \")",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(xargs wc:*)"
     ]
   }
 }

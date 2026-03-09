@@ -3,9 +3,14 @@
 This module extracts keypoints from segmented rope masks.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 import logging
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from src.perception.crossing_analysis import CrossingInfo
 
 import cv2
 import numpy as np
@@ -36,11 +41,15 @@ class Keypoint:
         position: (x, y) coordinates in image space
         keypoint_type: Type of keypoint ('endpoint', 'crossing', 'knot')
         confidence: Detection confidence (0.0 to 1.0)
+        crossing_info: Optional over/under analysis for crossings
     """
 
     position: Tuple[float, float]
     keypoint_type: str
     confidence: float
+    crossing_info: Optional[CrossingInfo] = field(
+        default=None, repr=False
+    )
 
 
 def _ensure_binary_mask(mask: np.ndarray) -> np.ndarray:
