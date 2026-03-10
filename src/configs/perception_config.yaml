@@ -82,11 +82,11 @@ perception:
     pre_dilate_iterations: 1
 
   crossing_analysis:
-    color_sample_length: 15    # pixels along each branch to sample
-    color_sample_radius: 2     # neighborhood radius for color sampling
-    center_sample_radius: 4    # patch radius at crossing center
-    junction_search_radius: 10 # search for junction near crossing position
-    min_branches: 4            # require 4 branches for over/under analysis
+    width_ratio: 1.4           # dist_transform / normal_half_width threshold
+    min_crossing_area: 30      # minimum pixels for crossing region
+    color_sample_length: 15    # pixels along skeleton outside region
+    color_sample_radius: 2     # neighborhood for color sampling
+    center_sample_radius: 4    # patch at crossing center
     min_confidence: 0.2        # minimum confidence to report a crossing
     hue_weight: 1.0            # weight for hue in color distance
     saturation_weight: 0.5     # weight for saturation in color distance

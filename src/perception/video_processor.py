@@ -15,7 +15,10 @@ import cv2
 import numpy as np
 
 from src.hardware.camera import Camera
-from src.perception.crossing_analysis import analyze_crossing_over_under
+from src.perception.crossing_analysis import (
+    analyze_crossing_over_under,
+    patch_skeleton_at_crossings,
+)
 from src.perception.keypoint_detection import Keypoint, detect_keypoints
 from src.perception.keypoint_mask import create_keypoint_class_mask
 from src.perception.rope_segmentation import RopeMask, segment_rope
@@ -224,36 +227,41 @@ class LiveVideoProcessor:
                 # 4. Extract path
                 path = extract_path(skeleton)
 
-            # 5. Crossing over/under analysis
+            # 5. Crossing over/under analysis (region-based)
             if (
                 not disable_crossing_analysis
-                and not disable_keypoint_extraction
                 and skeleton is not None
             ):
-                crossing_keypoints = [
-                    kp for kp in keypoints
-                    if kp.keypoint_type == "crossing"
-                ]
-                if crossing_keypoints:
-                    crossing_infos = analyze_crossing_over_under(
-                        frame,
-                        skeleton,
-                        rope_mask.mask,
-                        crossing_keypoints,
-                        config=self.perception_config.get(
-                            "crossing_analysis", {}
-                        ),
+                crossing_infos = analyze_crossing_over_under(
+                    frame,
+                    skeleton,
+                    rope_mask.mask,
+                    config=self.perception_config.get(
+                        "crossing_analysis", {}
+                    ),
+                )
+                if crossing_infos:
+                    # Patch skeleton at crossing regions
+                    skeleton = patch_skeleton_at_crossings(
+                        skeleton, crossing_infos
                     )
-                    # Attach CrossingInfo to matching keypoints
+                    # Re-extract path from patched skeleton
+                    path = extract_path(skeleton)
+                    # Replace skeleton-based crossing keypoints
+                    # with region-based ones
+                    keypoints = [
+                        kp for kp in keypoints
+                        if kp.keypoint_type != "crossing"
+                    ]
                     for ci in crossing_infos:
-                        for kp in keypoints:
-                            if kp.keypoint_type != "crossing":
-                                continue
-                            dx = kp.position[0] - ci.position[0]
-                            dy = kp.position[1] - ci.position[1]
-                            if dx * dx + dy * dy < 1.0:
-                                kp.crossing_info = ci
-                                break
+                        keypoints.append(
+                            Keypoint(
+                                position=ci.position,
+                                keypoint_type="crossing",
+                                confidence=ci.confidence,
+                                crossing_info=ci,
+                            )
+                        )
 
             # 6. Estimate state
             rope_state = estimate_rope_state(keypoints, path)

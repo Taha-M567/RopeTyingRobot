@@ -350,12 +350,34 @@ def _extract_graph_structure(
         all_nodes.append(tuple(jn))
         node_types.append('junction')
 
-    # Convert node coordinates to (row, col) for skeleton indexing
+    # Convert node coordinates to (row, col) for skeleton indexing.
+    # Junction centroids can land off the skeleton; snap them to the
+    # nearest skeleton pixel so BFS can reach them.
+    h, w = skeleton_binary.shape
     node_coords_rc = []
-    for node in all_nodes:
+    for idx, node in enumerate(all_nodes):
         x, y = node
-        # x is column, y is row in our convention
-        node_coords_rc.append((int(round(y)), int(round(x))))
+        r, c = int(round(y)), int(round(x))
+        r = min(max(r, 0), h - 1)
+        c = min(max(c, 0), w - 1)
+        if not skeleton_binary[r, c] and node_types[idx] == 'junction':
+            # Snap to nearest skeleton pixel in a small search area
+            best_r, best_c = r, c
+            best_dist = float('inf')
+            search = max(5, int(np.sqrt(
+                np.count_nonzero(skeleton_binary) * 0.01
+            )))
+            for dr in range(-search, search + 1):
+                for dc in range(-search, search + 1):
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < h and 0 <= nc < w:
+                        if skeleton_binary[nr, nc]:
+                            d = dr * dr + dc * dc
+                            if d < best_dist:
+                                best_dist = d
+                                best_r, best_c = nr, nc
+            r, c = best_r, best_c
+        node_coords_rc.append((r, c))
 
     # Extract edges by tracing paths between nodes
     edges = []
@@ -533,8 +555,11 @@ def _trace_path_between_nodes(
     while queue:
         current, path = queue.popleft()
 
-        # Check if we reached the end node
-        if current == end_rc:
+        # Check if we reached the end node (allow 1px tolerance
+        # in case the node coordinate is slightly off-skeleton)
+        dr_end = abs(current[0] - end_rc[0])
+        dc_end = abs(current[1] - end_rc[1])
+        if dr_end <= 1 and dc_end <= 1:
             return path
 
         # Explore neighbors
@@ -758,6 +783,34 @@ def skeletonize_rope(
     return skeleton
 
 
+def _smooth_path(path: np.ndarray, window: int = 5) -> np.ndarray:
+    """Smooth a path using a 1-D moving average on x and y separately.
+
+    Endpoints are preserved exactly; interior points are averaged.
+
+    Args:
+        path: (N, 2) array of (x, y) coordinates.
+        window: Smoothing window size (must be odd, >= 3).
+
+    Returns:
+        Smoothed (N, 2) array.
+    """
+    if path is None or len(path) < 3:
+        return path
+
+    window = max(3, window | 1)  # ensure odd and >= 3
+    half = window // 2
+
+    smoothed = path.astype(np.float32).copy()
+    n = len(smoothed)
+    for i in range(1, n - 1):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        smoothed[i] = np.mean(path[lo:hi], axis=0)
+
+    return smoothed
+
+
 def extract_path(skeleton: np.ndarray) -> PathDict:
     """Extract ordered path from skeleton as graph structure.
 
@@ -821,6 +874,11 @@ def extract_path(skeleton: np.ndarray) -> PathDict:
             if len(skeleton_coords) > 0:
                 row, col = skeleton_coords[0]
                 endpoints = np.array([[col, row]], dtype=np.float32)
+
+        # Smooth all paths to remove pixel-level jaggedness
+        edges = [_smooth_path(e) for e in edges]
+        if main_path is not None:
+            main_path = _smooth_path(main_path)
 
         return {
             "endpoints": endpoints,

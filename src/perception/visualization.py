@@ -163,64 +163,85 @@ def draw_crossing_over_under(
     crossing_details: list[CrossingInfo],
     over_color: tuple[int, int, int] = (0, 255, 0),
     under_color: tuple[int, int, int] = (0, 0, 255),
-    radius: int = 14,
-    thickness: int = 2,
+    gap_radius: int = 8,
+    thickness: int = 3,
 ) -> np.ndarray:
-    """Draw over/under indicators at each crossing.
+    """Draw knot-diagram-style over/under at each crossing.
+
+    Uses the standard knot-diagram convention: the over (top) strand
+    is drawn as a continuous line through the crossing, while the
+    under (bottom) strand has a gap at the crossing center, making
+    the topology unambiguous in a single image — suitable as an RL
+    observation for a robot arm learning to untie ropes.
 
     Args:
         image: Image to draw on (BGR format).
         crossing_details: List of ``CrossingInfo`` objects.
-        over_color: BGR color for the over (top) strand indicator.
-        under_color: BGR color for the under (bottom) strand indicator.
-        radius: Radius of the indicator circle.
-        thickness: Thickness of drawn shapes.
+        over_color: BGR color for the over (top) strand.
+        under_color: BGR color for the under (bottom) strand.
+        gap_radius: Pixel radius of the gap cut from the under
+            strand at the crossing center.
+        thickness: Line thickness for both strands.
 
     Returns:
         Image with crossing indicators drawn.
     """
     result = image.copy()
     for ci in crossing_details:
-        cx, cy = int(round(ci.position[0])), int(round(ci.position[1]))
+        cx = int(round(ci.position[0]))
+        cy = int(round(ci.position[1]))
 
-        # Outer circle — over strand color
-        cv2.circle(result, (cx, cy), radius, over_color, thickness)
-        # Inner circle — under strand color
-        cv2.circle(
-            result, (cx, cy), max(1, radius // 2), under_color, thickness
-        )
+        over_path = getattr(ci, "over_strand_path", None)
+        under_path = getattr(ci, "under_strand_path", None)
 
-        # "O" for over label
-        cv2.putText(
-            result,
-            "O",
-            (cx + radius + 2, cy - 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            over_color,
-            1,
-        )
-        # "U" for under label
-        cv2.putText(
-            result,
-            "U",
-            (cx + radius + 2, cy + 12),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            under_color,
-            1,
-        )
+        # --- Under strand first (with gap at center) ---
+        if under_path is not None and len(under_path) >= 2:
+            pts = np.array(
+                [[p[1], p[0]] for p in under_path],
+                dtype=np.int32,
+            )
+            # Split into segments outside the gap radius
+            before = []
+            after = []
+            past_gap = False
+            for pt in pts:
+                dist = np.hypot(pt[0] - cx, pt[1] - cy)
+                if dist > gap_radius:
+                    if not past_gap:
+                        before.append(pt)
+                    else:
+                        after.append(pt)
+                else:
+                    past_gap = True
+            if len(before) >= 2:
+                cv2.polylines(
+                    result,
+                    [np.array(before, dtype=np.int32)],
+                    False,
+                    under_color,
+                    thickness,
+                )
+            if len(after) >= 2:
+                cv2.polylines(
+                    result,
+                    [np.array(after, dtype=np.int32)],
+                    False,
+                    under_color,
+                    thickness,
+                )
 
-        # Confidence text
-        cv2.putText(
-            result,
-            f"{ci.confidence:.2f}",
-            (cx - radius, cy + radius + 12),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.3,
-            (255, 255, 255),
-            1,
-        )
+        # --- Over strand on top (continuous, no gap) ---
+        if over_path is not None and len(over_path) >= 2:
+            pts = np.array(
+                [[p[1], p[0]] for p in over_path],
+                dtype=np.int32,
+            )
+            cv2.polylines(
+                result, [pts], False, over_color, thickness
+            )
+
+        # Small filled dot at crossing center
+        cv2.circle(result, (cx, cy), 3, over_color, -1)
 
     return result
 

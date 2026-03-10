@@ -11,7 +11,10 @@ This module handles all computer vision tasks using OpenCV:
 # Import core classes and functions
 from src.perception.crossing_analysis import (
     CrossingInfo,
+    CrossingRegion,
     analyze_crossing_over_under,
+    detect_crossing_regions,
+    patch_skeleton_at_crossings,
 )
 from src.perception.keypoint_detection import Keypoint, detect_keypoints
 from src.perception.rope_segmentation import RopeMask, segment_rope
@@ -25,10 +28,13 @@ from src.perception.state_estimation import RopeState, estimate_rope_state
 
 __all__ = [
     "CrossingInfo",
+    "CrossingRegion",
     "Keypoint",
     "RopeMask",
     "RopeState",
     "analyze_crossing_over_under",
+    "detect_crossing_regions",
+    "patch_skeleton_at_crossings",
     "segment_rope",
     "detect_keypoints",
     "skeletonize_rope",
