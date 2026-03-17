@@ -43,7 +43,7 @@
     <child link="rope_hinge_0"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_0" type="revolute">
@@ -51,7 +51,7 @@
     <child link="rope_seg_1"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_1">
@@ -97,7 +97,7 @@
     <child link="rope_hinge_1"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_1" type="revolute">
@@ -105,7 +105,7 @@
     <child link="rope_seg_2"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_2">
@@ -151,7 +151,7 @@
     <child link="rope_hinge_2"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_2" type="revolute">
@@ -159,7 +159,7 @@
     <child link="rope_seg_3"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_3">
@@ -205,7 +205,7 @@
     <child link="rope_hinge_3"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_3" type="revolute">
@@ -213,7 +213,7 @@
     <child link="rope_seg_4"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_4">
@@ -259,7 +259,7 @@
     <child link="rope_hinge_4"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_4" type="revolute">
@@ -267,7 +267,7 @@
     <child link="rope_seg_5"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_5">
@@ -313,7 +313,7 @@
     <child link="rope_hinge_5"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_5" type="revolute">
@@ -321,7 +321,7 @@
     <child link="rope_seg_6"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_6">
@@ -367,7 +367,7 @@
     <child link="rope_hinge_6"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_6" type="revolute">
@@ -375,7 +375,7 @@
     <child link="rope_seg_7"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_7">
@@ -421,7 +421,7 @@
     <child link="rope_hinge_7"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_7" type="revolute">
@@ -429,7 +429,7 @@
     <child link="rope_seg_8"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_8">
@@ -475,7 +475,7 @@
     <child link="rope_hinge_8"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_8" type="revolute">
@@ -483,7 +483,7 @@
     <child link="rope_seg_9"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_9">
@@ -529,7 +529,7 @@
     <child link="rope_hinge_9"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_9" type="revolute">
@@ -537,7 +537,7 @@
     <child link="rope_seg_10"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_10">
@@ -583,7 +583,7 @@
     <child link="rope_hinge_10"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_10" type="revolute">
@@ -591,7 +591,7 @@
     <child link="rope_seg_11"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_11">
@@ -637,7 +637,7 @@
     <child link="rope_hinge_11"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_11" type="revolute">
@@ -645,7 +645,7 @@
     <child link="rope_seg_12"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_12">
@@ -691,7 +691,7 @@
     <child link="rope_hinge_12"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_12" type="revolute">
@@ -699,7 +699,7 @@
     <child link="rope_seg_13"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_13">
@@ -745,7 +745,7 @@
     <child link="rope_hinge_13"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_13" type="revolute">
@@ -753,7 +753,7 @@
     <child link="rope_seg_14"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_14">
@@ -799,7 +799,7 @@
     <child link="rope_hinge_14"/>
     <origin xyz="0.028125 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <joint name="rope_yaw_14" type="revolute">
@@ -807,7 +807,7 @@
     <child link="rope_seg_15"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.523599" upper="0.523599" effort="0.1" velocity="10.0"/>
+    <limit lower="-2.094395" upper="2.094395" effort="0.1" velocity="10.0"/>
     <dynamics damping="0.5" friction="0.0"/>
   </joint>
   <link name="rope_seg_15">

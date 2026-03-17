@@ -55,7 +55,7 @@ def generate_rope_urdf(
     segment_radius: float = 0.005,
     total_length: float = 0.45,
     density: float = 5000.0,
-    joint_limit_deg: float = 30.0,
+    joint_limit_deg: float = 120.0,
     output_path: Path | None = None,
 ) -> Path:
     """Generate an articulated rope chain URDF.

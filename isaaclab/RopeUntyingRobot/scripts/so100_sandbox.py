@@ -184,6 +184,14 @@ parser.add_argument(
     default=False,
     help="Skip startup checks for known Isaac Sim dependency conflicts.",
 )
+parser.add_argument(
+    "--rope_pos",
+    type=float,
+    nargs=3,
+    default=None,
+    metavar=("X", "Y", "Z"),
+    help="Rope spawn position as X Y Z (default: 0.25 0.0 0.05).",
+)
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -199,12 +207,17 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import carb.input
 import cv2
 import numpy as np
+import omni.appwindow
+import omni.ui as ui
 import torch
 
 import isaaclab.sim as sim_utils
+import isaacsim.util.debug_draw._debug_draw as omni_debug_draw
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
@@ -218,6 +231,199 @@ from src.perception.rope_segmentation import segment_rope
 from src.perception.skeletonization import extract_path, skeletonize_rope
 from src.perception.state_estimation import estimate_rope_state
 from src.utils.config_loader import load_config
+
+
+class RopeKeyboardController:
+    """Move and bend the rope with keyboard keys during simulation.
+
+    Translation (whole rope):
+        I / K  — forward / backward  (X)
+        J / L  — left / right        (Y)
+        U / O  — up / down           (Z)
+
+    Joint manipulation:
+        , / .  — select previous / next hinge joint
+        W / S  — bend pitch of selected joint  (+/-)
+        A / D  — bend yaw of selected joint    (+/-)
+
+    Other:
+        R      — reset rope to spawn position and straighten all joints
+    """
+
+    _NUM_HINGES = ROPE_NUM_SEGMENTS - 1
+    _ANGLE_STEP = 0.174  # ~10 degrees per keypress
+
+    def __init__(
+        self,
+        scene: "InteractiveScene",
+        default_pos: tuple[float, ...],
+        step_size: float = 0.02,
+    ):
+        self._scene = scene
+        self._step = step_size
+        self._default_pos = default_pos
+        self._offset = [0.0, 0.0, 0.0]
+        self._reset = False
+
+        # Joint bending state: track target angles for every joint.
+        num_joints = self._NUM_HINGES * 2  # pitch + yaw per hinge
+        self._joint_targets = [0.0] * num_joints
+        self._selected_hinge = 0
+        self._joints_dirty = False
+
+        # Hinge selection marker — bright magenta sphere, invisible to cameras.
+        marker_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/SelectedHinge",
+            markers={
+                "sphere": sim_utils.SphereCfg(
+                    radius=0.012,
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=(1.0, 0.0, 1.0),
+                        emissive_color=(0.5, 0.0, 0.5),
+                    ),
+                ),
+            },
+        )
+        self._hinge_marker = VisualizationMarkers(marker_cfg)
+
+        # Controls overlay HUD.
+        self._hinge_label: ui.Label | None = None
+        self._build_overlay()
+
+        app_window = omni.appwindow.get_default_app_window()
+        keyboard = app_window.get_keyboard()
+        self._input = carb.input.acquire_input_interface()
+        self._sub = self._input.subscribe_to_keyboard_events(keyboard, self._on_key)
+
+    def _build_overlay(self) -> None:
+        """Create a floating HUD window with the control reference."""
+        self._overlay = ui.Window(
+            "Rope Controls",
+            width=260,
+            height=310,
+        )
+        _title = {"font_size": 14, "color": 0xFF00DDFF}  # cyan
+        _key = {"font_size": 13}
+        _status = {"font_size": 14, "color": 0xFFFF55FF}  # magenta
+        with self._overlay.frame:
+            with ui.VStack(spacing=3):
+                ui.Spacer(height=2)
+                ui.Label("  MOVE ROPE", style=_title)
+                ui.Label("    I / K      Forward / Back  (X)", style=_key)
+                ui.Label("    J / L      Left / Right    (Y)", style=_key)
+                ui.Label("    U / O      Up / Down       (Z)", style=_key)
+                ui.Spacer(height=4)
+                ui.Label("  BEND JOINTS", style=_title)
+                ui.Label("    , / .       Prev / Next hinge", style=_key)
+                ui.Label("    W / S      Pitch  +/-", style=_key)
+                ui.Label("    A / D      Yaw    +/-", style=_key)
+                ui.Spacer(height=4)
+                ui.Label("  OTHER", style=_title)
+                ui.Label("    R            Reset all", style=_key)
+                ui.Spacer(height=6)
+                self._hinge_label = ui.Label(
+                    f"  Hinge: 0 / {self._NUM_HINGES - 1}",
+                    style=_status,
+                )
+
+    def _update_hinge_label(self) -> None:
+        if self._hinge_label is not None:
+            self._hinge_label.text = f"  Hinge: {self._selected_hinge} / {self._NUM_HINGES - 1}"
+
+    def _on_key(self, event: carb.input.KeyboardEvent, *args, **kwargs) -> bool:
+        if event.type != carb.input.KeyboardEventType.KEY_PRESS:
+            return True
+        k = event.input
+
+        # --- whole-rope translation ---
+        if k == carb.input.KeyboardInput.I:
+            self._offset[0] += self._step
+        elif k == carb.input.KeyboardInput.K:
+            self._offset[0] -= self._step
+        elif k == carb.input.KeyboardInput.J:
+            self._offset[1] += self._step
+        elif k == carb.input.KeyboardInput.L:
+            self._offset[1] -= self._step
+        elif k == carb.input.KeyboardInput.U:
+            self._offset[2] += self._step
+        elif k == carb.input.KeyboardInput.O:
+            self._offset[2] -= self._step
+
+        # --- joint selection ---
+        elif k == carb.input.KeyboardInput.COMMA:
+            self._selected_hinge = max(0, self._selected_hinge - 1)
+            self._update_hinge_label()
+        elif k == carb.input.KeyboardInput.PERIOD:
+            self._selected_hinge = min(self._NUM_HINGES - 1, self._selected_hinge + 1)
+            self._update_hinge_label()
+
+        # --- joint bending ---
+        elif k == carb.input.KeyboardInput.W:
+            idx = self._selected_hinge * 2  # pitch
+            self._joint_targets[idx] += self._ANGLE_STEP
+            self._joints_dirty = True
+        elif k == carb.input.KeyboardInput.S:
+            idx = self._selected_hinge * 2
+            self._joint_targets[idx] -= self._ANGLE_STEP
+            self._joints_dirty = True
+        elif k == carb.input.KeyboardInput.A:
+            idx = self._selected_hinge * 2 + 1  # yaw
+            self._joint_targets[idx] += self._ANGLE_STEP
+            self._joints_dirty = True
+        elif k == carb.input.KeyboardInput.D:
+            idx = self._selected_hinge * 2 + 1
+            self._joint_targets[idx] -= self._ANGLE_STEP
+            self._joints_dirty = True
+
+        # --- reset ---
+        elif k == carb.input.KeyboardInput.R:
+            self._reset = True
+
+        return True
+
+    def apply(self) -> None:
+        """Call once per sim step to apply any pending rope changes."""
+        rope = self._scene["rope"]
+
+        # Full reset: position + joints.
+        if self._reset:
+            state = rope.data.root_state_w.clone()
+            state[:, 0] = self._default_pos[0]
+            state[:, 1] = self._default_pos[1]
+            state[:, 2] = self._default_pos[2]
+            state[:, 7:] = 0.0
+            rope.write_root_state_to_sim(state)
+            self._joint_targets = [0.0] * (self._NUM_HINGES * 2)
+            self._joints_dirty = True
+            self._reset = False
+
+        # Translate whole rope.
+        dx, dy, dz = self._offset
+        if dx or dy or dz:
+            state = rope.data.root_state_w.clone()
+            state[:, 0] += dx
+            state[:, 1] += dy
+            state[:, 2] += dz
+            state[:, 7:] = 0.0
+            rope.write_root_state_to_sim(state)
+            self._offset = [0.0, 0.0, 0.0]
+
+        # Set joint position targets so the actuator drives bends.
+        if self._joints_dirty:
+            targets = torch.tensor(
+                [self._joint_targets],
+                dtype=torch.float32,
+                device=rope.device,
+            )
+            rope.set_joint_position_target(targets)
+            self._joints_dirty = False
+
+        # Update hinge selection marker.
+        # Body order: seg_0, hinge_0, seg_1, hinge_1, ...
+        # So hinge i is at body index 2*i + 1.
+        hinge_body_idx = self._selected_hinge * 2 + 1
+        hinge_pos = rope.data.body_pos_w[:1, hinge_body_idx, :]  # (1, 3)
+        self._hinge_marker.visualize(translations=hinge_pos)
 
 
 logger = logging.getLogger(__name__)
@@ -243,8 +449,9 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.18, 0.18, 0.18),
-                roughness=0.9,
+                diffuse_color=(0.15, 0.15, 0.15),
+                roughness=1.0,
+                metallic=0.0,
             ),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.025)),
@@ -288,8 +495,9 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.45, 0.35, 0.25),
-                roughness=0.8,
+                diffuse_color=(0.85, 0.85, 0.85),
+                roughness=1.0,
+                metallic=0.0,
             ),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.25, 0.0, -0.02)),
@@ -456,21 +664,93 @@ def _apply_rope_colors(sim: sim_utils.SimulationContext) -> None:
     )
 
 
+def _quat_to_rotmat(q_wxyz: np.ndarray) -> np.ndarray:
+    """Convert quaternion (w, x, y, z) to a 3x3 rotation matrix."""
+    w, x, y, z = q_wxyz
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+    ])
+
+
+def _draw_camera_fov(
+    scene: InteractiveScene,
+    draw_iface: Any,
+    cam_width: int,
+    cam_height: int,
+    table_z: float = 0.01,
+) -> None:
+    """Draw the camera's field-of-view frustum as cyan lines in the viewport."""
+    cam = scene["camera"]
+    try:
+        cam_pos = cam.data.pos_w[0].cpu().numpy()
+        cam_quat = cam.data.quat_w_world[0].cpu().numpy()
+    except (RuntimeError, IndexError, AttributeError):
+        return
+
+    R = _quat_to_rotmat(cam_quat)
+
+    # Intrinsics from the PinholeCameraCfg.
+    focal_length = 24.0
+    h_aperture = 20.955
+    fx = focal_length * cam_width / h_aperture
+    fy = fx
+    cx, cy = cam_width / 2.0, cam_height / 2.0
+
+    # Image corners → rays in OpenGL camera frame (Y-up, -Z forward).
+    corners_px = [(0, 0), (cam_width, 0), (cam_width, cam_height), (0, cam_height)]
+    corners_world: list[list[float]] = []
+    for u, v in corners_px:
+        ray_cam = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
+        ray_w = R @ ray_cam
+        if abs(ray_w[2]) < 1e-6:
+            continue
+        t = (table_z - cam_pos[2]) / ray_w[2]
+        if t > 0:
+            corners_world.append((cam_pos + t * ray_w).tolist())
+
+    if len(corners_world) < 4:
+        return
+
+    draw_iface.clear_lines()
+    starts: list[list[float]] = []
+    ends: list[list[float]] = []
+    # Rectangle on the table surface.
+    for i in range(4):
+        starts.append(corners_world[i])
+        ends.append(corners_world[(i + 1) % 4])
+    # Lines from camera to each corner.
+    for c in corners_world:
+        starts.append(cam_pos.tolist())
+        ends.append(c)
+    n = len(starts)
+    colors = [[0.0, 1.0, 1.0, 0.6]] * n
+    thicknesses = [2.0] * n
+    draw_iface.draw_lines(starts, ends, colors, thicknesses)
+
+
 def run_simulator(
     sim: sim_utils.SimulationContext,
     scene: InteractiveScene,
     perception_cfg: dict[str, Any],
+    rope_controller: RopeKeyboardController | None = None,
 ) -> None:
     """Run simulation and process camera frames through perception pipeline."""
     output_dir = _resolve_path(args_cli.output_dir, EXT_ROOT)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    draw_iface = omni_debug_draw.acquire_debug_draw_interface()
     sim_dt = sim.get_physics_dt()
     step_count = 0
 
     while simulation_app.is_running():
         if args_cli.max_steps > 0 and step_count >= args_cli.max_steps:
             break
+
+        # Apply any pending keyboard-driven rope movement.
+        if rope_controller is not None:
+            rope_controller.apply()
 
         # Keep the arm in default pose for stable image testing.
         targets = scene["robot"].data.default_joint_pos
@@ -479,6 +759,9 @@ def run_simulator(
 
         sim.step()
         scene.update(sim_dt)
+
+        # Draw camera FOV frustum (viewport overlay only, not captured by camera).
+        _draw_camera_fov(scene, draw_iface, args_cli.camera_width, args_cli.camera_height)
 
         try:
             camera_output = scene["camera"].data.output
@@ -568,6 +851,16 @@ def main() -> None:
         replicate_physics=True,
     )
     scene_cfg.robot = so100_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    # Override rope spawn position if provided via CLI.
+    if args_cli.rope_pos is not None:
+        from isaaclab.assets import ArticulationCfg as _ArtCfg
+
+        rope_cfg = rope_cfg.replace(
+            init_state=_ArtCfg.InitialStateCfg(
+                pos=tuple(args_cli.rope_pos),
+                joint_pos=rope_cfg.init_state.joint_pos,
+            ),
+        )
     scene_cfg.rope = rope_cfg.replace(prim_path="{ENV_REGEX_NS}/Rope")
     scene = InteractiveScene(scene_cfg)
 
@@ -586,7 +879,14 @@ def main() -> None:
     )
     logger.info("SO-100 + camera scene initialized. Running simulation...")
 
-    run_simulator(sim, scene, perception_cfg)
+    # Resolve the default rope position for the keyboard controller.
+    rope_default_pos = rope_cfg.init_state.pos
+    rope_ctrl = RopeKeyboardController(scene, default_pos=rope_default_pos)
+    logger.info(
+        "Rope keyboard controls active: I/K=X, J/L=Y, U/O=Z, R=reset"
+    )
+
+    run_simulator(sim, scene, perception_cfg, rope_controller=rope_ctrl)
 
 
 if __name__ == "__main__":
