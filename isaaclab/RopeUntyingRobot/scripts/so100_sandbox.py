@@ -2,7 +2,7 @@
 
 This script:
 1) Spawns the SO-100 arm from a local URDF asset.
-2) Adds a table and deformable rope to the scene.
+2) Adds a table and articulated rope chain to the scene.
 3) Adds a camera sensor in the Isaac Lab scene.
 4) Runs the existing OpenCV rope preprocessing pipeline on rendered RGB frames.
 
@@ -204,11 +204,13 @@ import numpy as np
 import torch
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 
+from rope_config import ROPE_NUM_SEGMENTS, create_rope_articulation_cfg
+from generate_rope_urdf import _interpolate_color
 from so100_config import create_so100_articulation_cfg
 from src.perception.keypoint_detection import detect_keypoints
 from src.perception.keypoint_mask import create_keypoint_class_mask
@@ -293,34 +295,7 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.25, 0.0, -0.02)),
     )
 
-    rope = DeformableObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Rope",
-        spawn=sim_utils.MeshCylinderCfg(
-            radius=0.00175,
-            height=0.45,
-            axis="X",
-            deformable_props=sim_utils.DeformableBodyPropertiesCfg(
-                self_collision=True,
-                solver_position_iteration_count=32,
-                vertex_velocity_damping=0.05,
-                simulation_hexahedral_resolution=10,
-                contact_offset=0.005,
-                rest_offset=0.0,
-            ),
-            physics_material=sim_utils.DeformableBodyMaterialCfg(
-                density=700.0,
-                youngs_modulus=2000000.0,
-                poissons_ratio=0.40,
-            ),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(1.0, 1.0, 1.0),
-                roughness=0.7,
-            ),
-        ),
-        init_state=DeformableObjectCfg.InitialStateCfg(
-            pos=(0.25, 0.0, 0.05),
-        ),
-    )
+    rope: ArticulationCfg = MISSING
 
 
 def _resolve_path(path_str: str, base_dir: Path) -> Path:
@@ -449,6 +424,38 @@ def _run_perception_pipeline(
     return vis, metrics
 
 
+def _apply_rope_colors(sim: sim_utils.SimulationContext) -> None:
+    """Apply Green->Yellow->Red->Blue gradient PreviewSurface materials to rope segments."""
+    stage = sim.stage
+    num_segments = ROPE_NUM_SEGMENTS
+    num_hinges = num_segments - 1
+
+    # Apply materials to segment links (cylinders).
+    for i in range(num_segments):
+        t = i / max(num_segments - 1, 1)
+        r, g, b, _ = _interpolate_color(t)
+        mat_path = f"/World/Looks/rope_mat_{i}"
+        prim_path = f"/World/envs/env_0/Rope/rope_seg_{i}"
+        mat_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=(r, g, b))
+        mat_cfg.func(mat_path, mat_cfg)
+        sim_utils.bind_visual_material(prim_path, mat_path)
+
+    # Apply matching materials to hinge links (spheres).
+    for i in range(num_hinges):
+        t = i / max(num_segments - 1, 1)
+        r, g, b, _ = _interpolate_color(t)
+        mat_path = f"/World/Looks/rope_hinge_mat_{i}"
+        prim_path = f"/World/envs/env_0/Rope/rope_hinge_{i}"
+        mat_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=(r, g, b))
+        mat_cfg.func(mat_path, mat_cfg)
+        sim_utils.bind_visual_material(prim_path, mat_path)
+
+    logger.info(
+        "Applied %d gradient materials (Green->Yellow->Red->Blue) to rope.",
+        num_segments + num_hinges,
+    )
+
+
 def run_simulator(
     sim: sim_utils.SimulationContext,
     scene: InteractiveScene,
@@ -473,7 +480,12 @@ def run_simulator(
         sim.step()
         scene.update(sim_dt)
 
-        camera_output = scene["camera"].data.output
+        try:
+            camera_output = scene["camera"].data.output
+        except RuntimeError:
+            # Camera buffers are not yet allocated on early frames.
+            step_count += 1
+            continue
         if "rgb" not in camera_output:
             step_count += 1
             continue
@@ -487,7 +499,7 @@ def run_simulator(
         vis, metrics = _run_perception_pipeline(frame_bgr, perception_cfg)
 
         if step_count % max(1, args_cli.log_interval) == 0:
-            rope_pos = scene["rope"].data.nodal_pos_w
+            rope_pos = scene["rope"].data.body_pos_w
             rope_center = rope_pos.mean(dim=1).squeeze(0)
             logger.info(
                 "step=%d conf=%.3f endpoints=%d crossings=%d"
@@ -543,17 +555,35 @@ def main() -> None:
         use_fabric=not args_cli.disable_fabric,
     )
     sim = sim_utils.SimulationContext(sim_cfg)
-    sim.set_camera_view(eye=[1.0, 1.0, 0.8], target=[0.0, 0.0, 0.2])
+    sim.set_camera_view(eye=[0.5, 0.4, 0.4], target=[0.25, 0.0, 0.02])
+
+    rope_cfg = create_rope_articulation_cfg(
+        asset_dir=ASSET_DIR,
+        force_conversion=args_cli.force_urdf_conversion,
+    )
 
     scene_cfg = So100PerceptionSceneCfg(
         num_envs=args_cli.num_envs,
         env_spacing=2.5,
-        replicate_physics=False,
+        replicate_physics=True,
     )
     scene_cfg.robot = so100_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    scene_cfg.rope = rope_cfg.replace(prim_path="{ENV_REGEX_NS}/Rope")
     scene = InteractiveScene(scene_cfg)
 
+    _apply_rope_colors(sim)
     sim.reset()
+
+    # Debug: verify rope exists and dump initial body positions.
+    rope_art = scene["rope"]
+    rope_pos = rope_art.data.body_pos_w
+    logger.info(
+        "Rope debug: num_bodies=%d, shape=%s",
+        rope_art.num_bodies, rope_pos.shape,
+    )
+    logger.info(
+        "Rope body positions (first env):\n%s", rope_pos[0],
+    )
     logger.info("SO-100 + camera scene initialized. Running simulation...")
 
     run_simulator(sim, scene, perception_cfg)

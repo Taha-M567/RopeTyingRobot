@@ -26,7 +26,8 @@
       "Bash(python:*)",
       "Bash(ls -la \"H:\\\\Hard_Repos\\\\RopeUntyingRobot\"\" | grep -v \"^d \")",
       "Bash(git:*)",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Bash(find /H/Hard_Repos/RopeUntyingRobot/isaaclab/RopeUntyingRobot -type f \\\\\\( -name \"*rope*\" -o -name \"*.usd\" \\\\\\) 2>/dev/null | grep -v \".kit_runtime\" | grep -v \".egg-info\")"
     ]
   }
 }

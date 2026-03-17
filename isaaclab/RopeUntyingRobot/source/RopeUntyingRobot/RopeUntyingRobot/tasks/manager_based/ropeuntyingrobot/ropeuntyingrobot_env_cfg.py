@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import AssetBaseCfg, DeformableObjectCfg
+from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -36,12 +36,18 @@ import sys as _sys
 if str(_ASSET_DIR) not in _sys.path:
     _sys.path.insert(0, str(_ASSET_DIR))
 
+from rope_config import create_rope_articulation_cfg  # noqa: E402
 from so100_config import create_so100_rl_articulation_cfg  # noqa: E402
 
 
 def _build_so100_cfg():
     """Build the SO-100 ArticulationCfg with RL actuator split."""
     return create_so100_rl_articulation_cfg(asset_dir=_ASSET_DIR)
+
+
+def _build_rope_cfg():
+    """Build the articulated rope-chain ArticulationCfg."""
+    return create_rope_articulation_cfg(asset_dir=_ASSET_DIR)
 
 
 # ============================================================================
@@ -51,7 +57,7 @@ def _build_so100_cfg():
 
 @configclass
 class RopeReachSceneCfg(InteractiveSceneCfg):
-    """SO-100 arm + table + deformable rope scene."""
+    """SO-100 arm + table + articulated rope chain scene."""
 
     # -- ground --
     ground = AssetBaseCfg(
@@ -87,34 +93,9 @@ class RopeReachSceneCfg(InteractiveSceneCfg):
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.25, 0.0, -0.02)),
     )
 
-    # -- deformable rope --
-    rope = DeformableObjectCfg(
+    # -- articulated rope chain --
+    rope = _build_rope_cfg().replace(
         prim_path="{ENV_REGEX_NS}/Rope",
-        spawn=sim_utils.MeshCylinderCfg(
-            radius=0.00175,
-            height=0.45,
-            axis="X",
-            deformable_props=sim_utils.DeformableBodyPropertiesCfg(
-                self_collision=True,
-                solver_position_iteration_count=32,
-                vertex_velocity_damping=0.05,
-                simulation_hexahedral_resolution=10,
-                contact_offset=0.005,
-                rest_offset=0.0,
-            ),
-            physics_material=sim_utils.DeformableBodyMaterialCfg(
-                density=700.0,
-                youngs_modulus=2000000.0,
-                poissons_ratio=0.40,
-            ),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(1.0, 1.0, 1.0),
-                roughness=0.7,
-            ),
-        ),
-        init_state=DeformableObjectCfg.InitialStateCfg(
-            pos=(0.25, 0.0, 0.05),
-        ),
     )
 
     # -- SO-100 robot --
@@ -257,7 +238,7 @@ class EventCfg:
     )
 
     reset_rope = EventTerm(
-        func=mdp.reset_rope_randomized,
+        func=mdp.reset_articulated_rope,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("rope"),
@@ -267,7 +248,7 @@ class EventCfg:
                 "z": (0.0, 0.0),
             },
             "rotation_range": (0.0, 6.283185307),
-            "per_node_noise_std": 0.01,
+            "joint_noise_std": 0.05,
         },
     )
 
@@ -349,7 +330,7 @@ class RopeReachEnvCfg(ManagerBasedRLEnvCfg):
     scene: RopeReachSceneCfg = RopeReachSceneCfg(
         num_envs=64,
         env_spacing=2.5,
-        replicate_physics=False,
+        replicate_physics=True,
     )
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

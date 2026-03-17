@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from isaaclab.assets import DeformableObject
+from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformer
 
@@ -20,14 +20,14 @@ def rope_com_pos(
 ) -> torch.Tensor:
     """Centre-of-mass position of the rope in world frame.
 
-    Computes the mean of all nodal positions for the deformable body.
+    Computes the mean of all body positions for the articulated chain.
 
     Returns:
         Tensor of shape ``(num_envs, 3)``.
     """
-    rope: DeformableObject = env.scene[asset_cfg.name]
-    # nodal_pos_w: (num_envs, num_nodes, 3)
-    return rope.data.nodal_pos_w.mean(dim=1)
+    rope: Articulation = env.scene[asset_cfg.name]
+    # body_pos_w: (num_envs, num_bodies, 3)
+    return rope.data.body_pos_w.mean(dim=1)
 
 
 def ee_pos_w(

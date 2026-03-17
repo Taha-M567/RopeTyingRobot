@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from isaaclab.assets import DeformableObject
+from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
@@ -19,6 +19,6 @@ def rope_below_height(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("rope"),
 ) -> torch.Tensor:
     """Terminate if the rope centre-of-mass falls below *min_height*."""
-    rope: DeformableObject = env.scene[asset_cfg.name]
-    rope_com_z = rope.data.nodal_pos_w.mean(dim=1)[:, 2]
+    rope: Articulation = env.scene[asset_cfg.name]
+    rope_com_z = rope.data.body_pos_w.mean(dim=1)[:, 2]
     return rope_com_z < min_height
