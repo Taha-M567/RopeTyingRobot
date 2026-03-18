@@ -215,7 +215,6 @@ import omni.ui as ui
 import torch
 
 import isaaclab.sim as sim_utils
-import isaacsim.util.debug_draw._debug_draw as omni_debug_draw
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
@@ -258,6 +257,8 @@ class RopeKeyboardController:
         scene: "InteractiveScene",
         default_pos: tuple[float, ...],
         step_size: float = 0.02,
+        cam_width: int = 640,
+        cam_height: int = 480,
     ):
         self._scene = scene
         self._step = step_size
@@ -285,6 +286,24 @@ class RopeKeyboardController:
             },
         )
         self._hinge_marker = VisualizationMarkers(marker_cfg)
+
+        # Camera FOV markers — cyan dotted outline showing the frustum.
+        self._cam_width = cam_width
+        self._cam_height = cam_height
+        fov_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/CameraFOV",
+            markers={
+                "sphere": sim_utils.SphereCfg(
+                    radius=0.006,
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=(0.0, 1.0, 1.0),
+                        emissive_color=(0.0, 0.3, 0.3),
+                    ),
+                ),
+            },
+        )
+        self._fov_marker = VisualizationMarkers(fov_cfg)
+        self._fov_positions: torch.Tensor | None = None
 
         # Controls overlay HUD.
         self._hinge_label: ui.Label | None = None
@@ -385,14 +404,23 @@ class RopeKeyboardController:
         """Call once per sim step to apply any pending rope changes."""
         rope = self._scene["rope"]
 
-        # Full reset: position + joints.
+        # Full reset: root position + orientation + all joint angles.
         if self._reset:
             state = rope.data.root_state_w.clone()
             state[:, 0] = self._default_pos[0]
             state[:, 1] = self._default_pos[1]
             state[:, 2] = self._default_pos[2]
-            state[:, 7:] = 0.0
+            state[:, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0])  # identity quat
+            state[:, 7:] = 0.0  # zero velocities
             rope.write_root_state_to_sim(state)
+
+            # Snap all joint positions and velocities to zero immediately.
+            n = rope.num_joints
+            rope.write_joint_state_to_sim(
+                torch.zeros(1, n, device=rope.device),
+                torch.zeros(1, n, device=rope.device),
+            )
+
             self._joint_targets = [0.0] * (self._NUM_HINGES * 2)
             self._joints_dirty = True
             self._reset = False
@@ -424,6 +452,93 @@ class RopeKeyboardController:
         hinge_body_idx = self._selected_hinge * 2 + 1
         hinge_pos = rope.data.body_pos_w[:1, hinge_body_idx, :]  # (1, 3)
         self._hinge_marker.visualize(translations=hinge_pos)
+
+        # Camera FOV markers (compute once, visualize every frame).
+        if self._fov_positions is None:
+            self._compute_fov()
+        if self._fov_positions is not None:
+            self._fov_marker.visualize(translations=self._fov_positions)
+
+    def _compute_fov(self) -> None:
+        """Compute camera FOV frustum points (called once when camera data is ready)."""
+        cam = self._scene["camera"]
+        try:
+            cam_pos = cam.data.pos_w[0].cpu().numpy()
+            quat_gl = cam.data.quat_w_opengl[0].cpu().numpy()
+        except Exception:
+            return  # camera data not ready; retry next frame
+
+        R = _quat_to_rotmat(quat_gl)
+
+        # Camera intrinsics (must match PinholeCameraCfg in scene config).
+        focal_length = 24.0
+        h_aperture = 20.955
+        w, h = self._cam_width, self._cam_height
+        fx = focal_length * w / h_aperture
+        fy = fx
+        cx, cy = w / 2.0, h / 2.0
+
+        logger.info(
+            "Camera FOV: pos=(%.3f, %.3f, %.3f) quat_opengl=(%.3f, %.3f, %.3f, %.3f)",
+            *cam_pos, *quat_gl,
+        )
+
+        # Normalised ray directions for 4 image corners (OpenGL: -Z forward).
+        corners_px = [(0, 0), (w, 0), (w, h), (0, h)]
+        ray_dirs: list[np.ndarray] = []
+        for u, v in corners_px:
+            rc = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
+            rc /= np.linalg.norm(rc)
+            ray_dirs.append(R @ rc)
+
+        # Frustum far-plane corners.
+        depth = 0.40
+        far_pts = [cam_pos + depth * d for d in ray_dirs]
+
+        # Build a list of points along the frustum edges (dotted line effect).
+        pts: list[np.ndarray] = []
+        n_per = 8  # points per edge
+
+        # Camera → each far corner (4 edges).
+        for fp in far_pts:
+            for j in range(n_per + 1):
+                t = j / n_per
+                pts.append(cam_pos * (1 - t) + fp * t)
+
+        # Far-plane rectangle (4 edges, skip duplicated endpoints).
+        for i in range(4):
+            p0, p1 = far_pts[i], far_pts[(i + 1) % 4]
+            for j in range(1, n_per):
+                t = j / n_per
+                pts.append(p0 * (1 - t) + p1 * t)
+
+        # Table-surface footprint (only bottom-image rays hit the table
+        # because the camera looks roughly horizontal).
+        table_z = 0.01
+        table_pts: list[np.ndarray] = []
+        for d in ray_dirs:
+            if abs(d[2]) > 1e-6:
+                tv = (table_z - cam_pos[2]) / d[2]
+                if tv > 0:
+                    table_pts.append(cam_pos + tv * d)
+        if len(table_pts) >= 2:
+            for i in range(len(table_pts)):
+                p0 = table_pts[i]
+                p1 = table_pts[(i + 1) % len(table_pts)]
+                for j in range(n_per + 1):
+                    t = j / n_per
+                    pts.append(p0 * (1 - t) + p1 * t)
+
+        self._fov_positions = torch.tensor(
+            [p.tolist() for p in pts],
+            dtype=torch.float32,
+            device=self._scene["rope"].device,
+        )
+        logger.info(
+            "Camera FOV: %d marker points (%d frustum + %d table).",
+            len(pts), len(pts) - (n_per + 1) * len(table_pts),
+            (n_per + 1) * max(0, len(table_pts) - 1) + len(table_pts),
+        )
 
 
 logger = logging.getLogger(__name__)
@@ -674,62 +789,6 @@ def _quat_to_rotmat(q_wxyz: np.ndarray) -> np.ndarray:
     ])
 
 
-def _draw_camera_fov(
-    scene: InteractiveScene,
-    draw_iface: Any,
-    cam_width: int,
-    cam_height: int,
-    table_z: float = 0.01,
-) -> None:
-    """Draw the camera's field-of-view frustum as cyan lines in the viewport."""
-    cam = scene["camera"]
-    try:
-        cam_pos = cam.data.pos_w[0].cpu().numpy()
-        cam_quat = cam.data.quat_w_world[0].cpu().numpy()
-    except (RuntimeError, IndexError, AttributeError):
-        return
-
-    R = _quat_to_rotmat(cam_quat)
-
-    # Intrinsics from the PinholeCameraCfg.
-    focal_length = 24.0
-    h_aperture = 20.955
-    fx = focal_length * cam_width / h_aperture
-    fy = fx
-    cx, cy = cam_width / 2.0, cam_height / 2.0
-
-    # Image corners → rays in OpenGL camera frame (Y-up, -Z forward).
-    corners_px = [(0, 0), (cam_width, 0), (cam_width, cam_height), (0, cam_height)]
-    corners_world: list[list[float]] = []
-    for u, v in corners_px:
-        ray_cam = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
-        ray_w = R @ ray_cam
-        if abs(ray_w[2]) < 1e-6:
-            continue
-        t = (table_z - cam_pos[2]) / ray_w[2]
-        if t > 0:
-            corners_world.append((cam_pos + t * ray_w).tolist())
-
-    if len(corners_world) < 4:
-        return
-
-    draw_iface.clear_lines()
-    starts: list[list[float]] = []
-    ends: list[list[float]] = []
-    # Rectangle on the table surface.
-    for i in range(4):
-        starts.append(corners_world[i])
-        ends.append(corners_world[(i + 1) % 4])
-    # Lines from camera to each corner.
-    for c in corners_world:
-        starts.append(cam_pos.tolist())
-        ends.append(c)
-    n = len(starts)
-    colors = [[0.0, 1.0, 1.0, 0.6]] * n
-    thicknesses = [2.0] * n
-    draw_iface.draw_lines(starts, ends, colors, thicknesses)
-
-
 def run_simulator(
     sim: sim_utils.SimulationContext,
     scene: InteractiveScene,
@@ -740,7 +799,6 @@ def run_simulator(
     output_dir = _resolve_path(args_cli.output_dir, EXT_ROOT)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    draw_iface = omni_debug_draw.acquire_debug_draw_interface()
     sim_dt = sim.get_physics_dt()
     step_count = 0
 
@@ -759,9 +817,6 @@ def run_simulator(
 
         sim.step()
         scene.update(sim_dt)
-
-        # Draw camera FOV frustum (viewport overlay only, not captured by camera).
-        _draw_camera_fov(scene, draw_iface, args_cli.camera_width, args_cli.camera_height)
 
         try:
             camera_output = scene["camera"].data.output
@@ -881,7 +936,10 @@ def main() -> None:
 
     # Resolve the default rope position for the keyboard controller.
     rope_default_pos = rope_cfg.init_state.pos
-    rope_ctrl = RopeKeyboardController(scene, default_pos=rope_default_pos)
+    rope_ctrl = RopeKeyboardController(
+        scene, default_pos=rope_default_pos,
+        cam_width=args_cli.camera_width, cam_height=args_cli.camera_height,
+    )
     logger.info(
         "Rope keyboard controls active: I/K=X, J/L=Y, U/O=Z, R=reset"
     )
