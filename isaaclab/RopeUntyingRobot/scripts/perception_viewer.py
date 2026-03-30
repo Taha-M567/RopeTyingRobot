@@ -1,7 +1,7 @@
 """Live viewer for the SO-100 perception pipeline output.
 
 Run this in a separate terminal while so100_sandbox.py is running
-with --show.  Uses tkinter (stdlib) so no extra packages are needed.
+with --show.  Uses OpenCV (already a project dependency).
 
 Usage:
     python scripts/perception_viewer.py
@@ -11,10 +11,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import tkinter as tk
 from pathlib import Path
 
-from PIL import Image, ImageTk
+import cv2
 
 DEFAULT_IMAGE = (
     Path(__file__).resolve().parents[1]
@@ -23,39 +22,7 @@ DEFAULT_IMAGE = (
     / "latest.png"
 )
 
-
-class PerceptionViewer:
-    """Tkinter window that polls a PNG file and displays it live."""
-
-    def __init__(self, image_path: Path, refresh_ms: int = 33) -> None:
-        self.image_path = image_path
-        self.refresh_ms = refresh_ms
-        self.last_mtime = 0.0
-
-        self.root = tk.Tk()
-        self.root.title("SO100 Perception")
-        self.label = tk.Label(self.root)
-        self.label.pack()
-        self.root.bind("<q>", lambda _: self.root.destroy())
-
-        self._poll()
-        self.root.mainloop()
-
-    def _poll(self) -> None:
-        try:
-            if self.image_path.exists():
-                mtime = self.image_path.stat().st_mtime
-                if mtime != self.last_mtime:
-                    img = Image.open(self.image_path)
-                    self._tk_img = ImageTk.PhotoImage(img)
-                    self.label.configure(image=self._tk_img)
-                    self.root.title(
-                        f"SO100 Perception  ({img.width}x{img.height})"
-                    )
-                    self.last_mtime = mtime
-        except Exception:
-            pass  # file may be mid-write
-        self.root.after(self.refresh_ms, self._poll)
+WINDOW_NAME = "SO100 Perception"
 
 
 def main() -> None:
@@ -75,12 +42,29 @@ def main() -> None:
     args = parser.parse_args()
 
     image_path = Path(args.image)
-    refresh_ms = max(1, 1000 // args.fps)
+    delay_ms = max(1, 1000 // args.fps)
+    last_mtime = 0.0
 
     print(f"Watching: {image_path}")
-    print("Press 'q' in the window to quit.")
+    print("Press 'q' in the viewer window to quit.")
 
-    PerceptionViewer(image_path, refresh_ms)
+    if not image_path.exists():
+        print("Waiting for sandbox to write first frame...")
+
+    while True:
+        if image_path.exists():
+            mtime = image_path.stat().st_mtime
+            if mtime != last_mtime:
+                img = cv2.imread(str(image_path))
+                if img is not None:
+                    cv2.imshow(WINDOW_NAME, img)
+                    last_mtime = mtime
+
+        key = cv2.waitKey(delay_ms) & 0xFF
+        if key == ord("q"):
+            break
+
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

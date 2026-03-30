@@ -257,8 +257,6 @@ class RopeKeyboardController:
         scene: "InteractiveScene",
         default_pos: tuple[float, ...],
         step_size: float = 0.02,
-        cam_width: int = 640,
-        cam_height: int = 480,
     ):
         self._scene = scene
         self._step = step_size
@@ -286,24 +284,6 @@ class RopeKeyboardController:
             },
         )
         self._hinge_marker = VisualizationMarkers(marker_cfg)
-
-        # Camera FOV markers — cyan dotted outline showing the frustum.
-        self._cam_width = cam_width
-        self._cam_height = cam_height
-        fov_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/CameraFOV",
-            markers={
-                "sphere": sim_utils.SphereCfg(
-                    radius=0.006,
-                    visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=(0.0, 1.0, 1.0),
-                        emissive_color=(0.0, 0.3, 0.3),
-                    ),
-                ),
-            },
-        )
-        self._fov_marker = VisualizationMarkers(fov_cfg)
-        self._fov_positions: torch.Tensor | None = None
 
         # Controls overlay HUD.
         self._hinge_label: ui.Label | None = None
@@ -453,92 +433,6 @@ class RopeKeyboardController:
         hinge_pos = rope.data.body_pos_w[:1, hinge_body_idx, :]  # (1, 3)
         self._hinge_marker.visualize(translations=hinge_pos)
 
-        # Camera FOV markers (compute once, visualize every frame).
-        if self._fov_positions is None:
-            self._compute_fov()
-        if self._fov_positions is not None:
-            self._fov_marker.visualize(translations=self._fov_positions)
-
-    def _compute_fov(self) -> None:
-        """Compute camera FOV frustum points (called once when camera data is ready)."""
-        cam = self._scene["camera"]
-        try:
-            cam_pos = cam.data.pos_w[0].cpu().numpy()
-            quat_gl = cam.data.quat_w_opengl[0].cpu().numpy()
-        except Exception:
-            return  # camera data not ready; retry next frame
-
-        R = _quat_to_rotmat(quat_gl)
-
-        # Camera intrinsics (must match PinholeCameraCfg in scene config).
-        focal_length = 24.0
-        h_aperture = 20.955
-        w, h = self._cam_width, self._cam_height
-        fx = focal_length * w / h_aperture
-        fy = fx
-        cx, cy = w / 2.0, h / 2.0
-
-        logger.info(
-            "Camera FOV: pos=(%.3f, %.3f, %.3f) quat_opengl=(%.3f, %.3f, %.3f, %.3f)",
-            *cam_pos, *quat_gl,
-        )
-
-        # Normalised ray directions for 4 image corners (OpenGL: -Z forward).
-        corners_px = [(0, 0), (w, 0), (w, h), (0, h)]
-        ray_dirs: list[np.ndarray] = []
-        for u, v in corners_px:
-            rc = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
-            rc /= np.linalg.norm(rc)
-            ray_dirs.append(R @ rc)
-
-        # Frustum far-plane corners.
-        depth = 0.40
-        far_pts = [cam_pos + depth * d for d in ray_dirs]
-
-        # Build a list of points along the frustum edges (dotted line effect).
-        pts: list[np.ndarray] = []
-        n_per = 8  # points per edge
-
-        # Camera → each far corner (4 edges).
-        for fp in far_pts:
-            for j in range(n_per + 1):
-                t = j / n_per
-                pts.append(cam_pos * (1 - t) + fp * t)
-
-        # Far-plane rectangle (4 edges, skip duplicated endpoints).
-        for i in range(4):
-            p0, p1 = far_pts[i], far_pts[(i + 1) % 4]
-            for j in range(1, n_per):
-                t = j / n_per
-                pts.append(p0 * (1 - t) + p1 * t)
-
-        # Table-surface footprint (only bottom-image rays hit the table
-        # because the camera looks roughly horizontal).
-        table_z = 0.01
-        table_pts: list[np.ndarray] = []
-        for d in ray_dirs:
-            if abs(d[2]) > 1e-6:
-                tv = (table_z - cam_pos[2]) / d[2]
-                if tv > 0:
-                    table_pts.append(cam_pos + tv * d)
-        if len(table_pts) >= 2:
-            for i in range(len(table_pts)):
-                p0 = table_pts[i]
-                p1 = table_pts[(i + 1) % len(table_pts)]
-                for j in range(n_per + 1):
-                    t = j / n_per
-                    pts.append(p0 * (1 - t) + p1 * t)
-
-        self._fov_positions = torch.tensor(
-            [p.tolist() for p in pts],
-            dtype=torch.float32,
-            device=self._scene["rope"].device,
-        )
-        logger.info(
-            "Camera FOV: %d marker points (%d frustum + %d table).",
-            len(pts), len(pts) - (n_per + 1) * len(table_pts),
-            (n_per + 1) * max(0, len(table_pts) - 1) + len(table_pts),
-        )
 
 
 logger = logging.getLogger(__name__)
@@ -564,7 +458,7 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.15, 0.15, 0.15),
+                diffuse_color=(0.02, 0.02, 0.02),
                 roughness=1.0,
                 metallic=0.0,
             ),
@@ -595,8 +489,8 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
             clipping_range=(0.05, 10.0),
         ),
         offset=CameraCfg.OffsetCfg(
-            pos=(0.22, 0.0, 0.10),
-            rot=(0.5, -0.5, 0.5, -0.5),
+            pos=(0.25, 0.0, 0.50),
+            rot=(1.0, 0.0, 0.0, 0.0),
             convention="ros",
         ),
     )
@@ -610,7 +504,7 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.85, 0.85, 0.85),
+                diffuse_color=(0.05, 0.05, 0.05),
                 roughness=1.0,
                 metallic=0.0,
             ),
@@ -779,14 +673,108 @@ def _apply_rope_colors(sim: sim_utils.SimulationContext) -> None:
     )
 
 
-def _quat_to_rotmat(q_wxyz: np.ndarray) -> np.ndarray:
-    """Convert quaternion (w, x, y, z) to a 3x3 rotation matrix."""
-    w, x, y, z = q_wxyz
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ])
+def _spawn_camera_fov_prims(
+    sim: sim_utils.SimulationContext,
+    cam_width: int,
+    cam_height: int,
+) -> None:
+    """Spawn permanent USD sphere prims outlining the camera frustum and table footprint.
+
+    Must be called BEFORE ``sim.reset()`` so the Fabric Scene Delegate
+    picks up the new geometry.  Uses the known camera config pose rather
+    than sensor data (which is not populated until after reset).
+    """
+    from pxr import Gf, UsdGeom
+
+    # Camera world pose — must match CameraCfg offset in So100PerceptionSceneCfg.
+    # offset pos=(0.25, 0.0, 0.50), rot=(1,0,0,0) ROS convention (180° about X).
+    # Robot base is at the world origin, so camera world pos equals offset pos.
+    # The camera looks straight down (-Z), right is +X, image-up is +Y.
+    cam_pos = np.array([0.25, 0.0, 0.50])
+
+    # OpenGL rotation matrix for top-down camera is identity:
+    # right=(1,0,0), up=(0,1,0), -forward=(0,0,1) → camera looks along -Z.
+    R = np.eye(3)
+
+    # Camera intrinsics (must match PinholeCameraCfg in scene config).
+    focal_length = 24.0
+    h_aperture = 20.955
+    w, h = cam_width, cam_height
+    fx = focal_length * w / h_aperture
+    fy = fx
+    cx, cy = w / 2.0, h / 2.0
+
+    # Normalised ray directions for 4 image corners (OpenGL: -Z forward).
+    corners_px = [(0, 0), (w, 0), (w, h), (0, h)]
+    ray_dirs: list[np.ndarray] = []
+    for u, v in corners_px:
+        rc = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
+        rc /= np.linalg.norm(rc)
+        ray_dirs.append(R @ rc)
+
+    # Frustum far-plane corners.
+    depth = 0.40
+    far_pts = [cam_pos + depth * d for d in ray_dirs]
+
+    # Build points along frustum edges (dotted line effect).
+    pts: list[np.ndarray] = []
+    n_per = 8
+
+    # Camera → each far corner (4 edges).
+    for fp in far_pts:
+        for j in range(n_per + 1):
+            t = j / n_per
+            pts.append(cam_pos * (1 - t) + fp * t)
+
+    # Far-plane rectangle (4 edges).
+    for i in range(4):
+        p0, p1 = far_pts[i], far_pts[(i + 1) % 4]
+        for j in range(1, n_per):
+            t = j / n_per
+            pts.append(p0 * (1 - t) + p1 * t)
+
+    # Table-surface footprint.
+    table_z = 0.01
+    table_pts: list[np.ndarray] = []
+    for d in ray_dirs:
+        if abs(d[2]) > 1e-6:
+            tv = (table_z - cam_pos[2]) / d[2]
+            if tv > 0:
+                table_pts.append(cam_pos + tv * d)
+    if len(table_pts) >= 2:
+        for i in range(len(table_pts)):
+            p0 = table_pts[i]
+            p1 = table_pts[(i + 1) % len(table_pts)]
+            for j in range(n_per + 1):
+                t = j / n_per
+                pts.append(p0 * (1 - t) + p1 * t)
+
+    # Create cyan emissive material first.
+    mat_path = "/World/Looks/fov_mat"
+    mat_cfg = sim_utils.PreviewSurfaceCfg(
+        diffuse_color=(0.0, 1.0, 1.0),
+        emissive_color=(0.0, 0.5, 0.5),
+    )
+    mat_cfg.func(mat_path, mat_cfg)
+
+    # Spawn USD sphere prims under a parent Xform.
+    # purpose="guide" keeps them visible in the viewport but invisible to
+    # camera render products, so the perception pipeline won't detect them.
+    stage = sim.stage
+    xform = UsdGeom.Xform.Define(stage, "/World/CameraFOV")
+    xform.GetPurposeAttr().Set("guide")
+    for i, pt in enumerate(pts):
+        prim_path = f"/World/CameraFOV/s{i}"
+        sphere = UsdGeom.Sphere.Define(stage, prim_path)
+        sphere.GetRadiusAttr().Set(0.01)
+        sphere.AddTranslateOp().Set(Gf.Vec3d(float(pt[0]), float(pt[1]), float(pt[2])))
+        # Bind material per-sphere (parent inheritance unreliable with Fabric).
+        sim_utils.bind_visual_material(prim_path, mat_path)
+
+    logger.info(
+        "Camera FOV: spawned %d prims at cam_pos=(%.3f, %.3f, %.3f).",
+        len(pts), *cam_pos,
+    )
 
 
 def run_simulator(
@@ -893,7 +881,7 @@ def main() -> None:
         use_fabric=not args_cli.disable_fabric,
     )
     sim = sim_utils.SimulationContext(sim_cfg)
-    sim.set_camera_view(eye=[0.5, 0.4, 0.4], target=[0.25, 0.0, 0.02])
+    sim.set_camera_view(eye=[0.5, 0.5, 0.6], target=[0.25, 0.0, 0.02])
 
     rope_cfg = create_rope_articulation_cfg(
         asset_dir=ASSET_DIR,
@@ -920,7 +908,14 @@ def main() -> None:
     scene = InteractiveScene(scene_cfg)
 
     _apply_rope_colors(sim)
+    _spawn_camera_fov_prims(sim, args_cli.camera_width, args_cli.camera_height)
     sim.reset()
+
+    # Warm-up: camera sensor needs scene.update() to populate data.
+    for _ in range(3):
+        scene.write_data_to_sim()
+        sim.step()
+        scene.update(sim.get_physics_dt())
 
     # Debug: verify rope exists and dump initial body positions.
     rope_art = scene["rope"]
@@ -936,10 +931,7 @@ def main() -> None:
 
     # Resolve the default rope position for the keyboard controller.
     rope_default_pos = rope_cfg.init_state.pos
-    rope_ctrl = RopeKeyboardController(
-        scene, default_pos=rope_default_pos,
-        cam_width=args_cli.camera_width, cam_height=args_cli.camera_height,
-    )
+    rope_ctrl = RopeKeyboardController(scene, default_pos=rope_default_pos)
     logger.info(
         "Rope keyboard controls active: I/K=X, J/L=Y, U/O=Z, R=reset"
     )
