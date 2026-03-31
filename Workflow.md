@@ -18,9 +18,10 @@ the code lives, and how the pieces connect.
 6. [Isaac Lab Simulation](#6-isaac-lab-simulation)
 7. [RL Environment — RopeReach-SO100-v0](#7-rl-environment--ropereach-so100-v0)
 8. [Training and Evaluation Scripts](#8-training-and-evaluation-scripts)
-9. [Tests](#9-tests)
-10. [Running the Project](#10-running-the-project)
-11. [Phased Roadmap](#11-phased-roadmap)
+9. [Knot Configuration System](#9-knot-configuration-system)
+10. [Tests](#10-tests)
+11. [Running the Project](#11-running-the-project)
+12. [Phased Roadmap](#12-phased-roadmap)
 
 ---
 
@@ -50,46 +51,51 @@ RL environment** (GPU-accelerated physics + PPO training).
 ```
 RopeUntyingRobot/
 |
-|-- src/                          # Perception + hardware + utilities
-|   |-- perception/               # OpenCV rope analysis pipeline
-|   |   |-- rope_segmentation.py  # Step 1: find rope pixels
-|   |   |-- keypoint_detection.py # Step 2: find endpoints & crossings
-|   |   |-- keypoint_mask.py      # Step 2b: label pixels by class
-|   |   |-- skeletonization.py    # Step 3: thin to centerline + graph
-|   |   |-- state_estimation.py   # Step 4: summarise rope state
-|   |   |-- visualization.py      # Draw overlays on frames
-|   |   |-- video_processor.py    # Orchestrate the pipeline on live video
-|   |   +-- __init__.py
+|-- src/                              # Perception + hardware + utilities
+|   |-- perception/                   # OpenCV rope analysis pipeline
+|   |   |-- rope_segmentation.py      # Step 1: find rope pixels
+|   |   |-- keypoint_detection.py     # Step 2: find endpoints & crossings
+|   |   |-- keypoint_mask.py          # Step 2b: label pixels by class
+|   |   |-- crossing_analysis.py      # Crossing-specific analysis
+|   |   |-- skeletonization.py        # Step 3: thin to centerline + graph
+|   |   |-- state_estimation.py       # Step 4: summarise rope state
+|   |   |-- visualization.py          # Draw overlays on frames
+|   |   +-- video_processor.py        # Orchestrate the pipeline on live video
 |   |-- hardware/
-|   |   |-- camera.py             # USB camera capture + calibration stub
-|   |   +-- __init__.py
+|   |   +-- camera.py                 # USB camera capture + calibration stub
 |   |-- utils/
-|   |   |-- config_loader.py      # Load / save YAML configs
-|   |   |-- geometry.py           # 3D math helpers
-|   |   +-- logging_config.py     # Project-wide logging setup
+|   |   |-- config_loader.py          # Load / save YAML configs
+|   |   |-- geometry.py               # 3D math helpers
+|   |   +-- logging_config.py         # Project-wide logging setup
 |   +-- configs/
 |       |-- perception_config.yaml
 |       +-- camera_config.yaml
 |
-|-- isaaclab/RopeUntyingRobot/    # Isaac Lab extension (simulation + RL)
-|   |-- assets/                   # Robot model files
-|   |   |-- so100.urdf            # SO-100 robot description
-|   |   |-- so100_config.py       # URDF-to-USD converter + actuator configs
-|   |   |-- *.stl                 # 3D mesh files for each link
-|   |   +-- so100_from_urdf.usd   # Converted USD (auto-generated)
+|-- isaaclab/RopeUntyingRobot/        # Isaac Lab extension (simulation + RL)
+|   |-- assets/                       # Robot + rope model files
+|   |   |-- so100.urdf                # SO-100 robot description
+|   |   |-- so100_config.py           # URDF-to-USD converter + actuator configs
+|   |   |-- so100_from_urdf.usd       # Converted USD (auto-generated)
+|   |   |-- *.stl                     # 3D mesh files for each link
+|   |   |-- generate_rope_urdf.py     # Generates articulated rope chain URDF
+|   |   |-- rope_config.py            # Rope ArticulationCfg + knot config I/O
+|   |   |-- rope_chain.urdf           # Generated rope URDF (auto-generated)
+|   |   |-- rope_chain_from_urdf.usd  # Converted rope USD (auto-generated)
+|   |   +-- knot_configs/             # Saved knot configurations (YAML)
+|   |       +-- straight.yaml         # Default straight rope (all joints zero)
 |   |-- scripts/
-|   |   |-- so100_sandbox.py      # Interactive sandbox scene
-|   |   |-- random_agent.py       # Sanity-check with random actions
-|   |   |-- zero_agent.py         # Sanity-check with zero actions
-|   |   |-- list_envs.py          # Print registered environments
-|   |   |-- perception_viewer.py  # Tkinter viewer for sim perception
+|   |   |-- so100_sandbox.py          # Interactive sandbox (dual camera + perception)
+|   |   |-- perception_viewer.py      # Live OpenCV dual-view viewer
+|   |   |-- random_agent.py           # Sanity-check with random actions
+|   |   |-- zero_agent.py             # Sanity-check with zero actions
+|   |   |-- list_envs.py              # Print registered environments
 |   |   +-- rsl_rl/
-|   |       |-- train.py          # Launch RL training
-|   |       |-- play.py           # Evaluate a trained policy
-|   |       +-- cli_args.py       # Shared CLI argument helpers
-|   +-- source/RopeUntyingRobot/  # Installable Python extension
+|   |       |-- train.py              # Launch RL training
+|   |       |-- play.py               # Evaluate a trained policy
+|   |       +-- cli_args.py           # Shared CLI argument helpers
+|   +-- source/RopeUntyingRobot/      # Installable Python extension
 |       +-- RopeUntyingRobot/
-|           |-- __init__.py       # Registers gym envs + UI extension
+|           |-- __init__.py           # Registers gym envs + UI extension
 |           |-- tasks/
 |           |   +-- manager_based/ropeuntyingrobot/
 |           |       |-- __init__.py              # gym.register("RopeReach-SO100-v0")
@@ -98,17 +104,17 @@ RopeUntyingRobot/
 |           |       |   |-- __init__.py          # Re-exports everything
 |           |       |   |-- observations.py      # rope_com_pos, ee_pos_w
 |           |       |   |-- rewards.py           # reaching_rope, close_to_rope
-|           |       |   +-- terminations.py      # rope_below_height
+|           |       |   |-- terminations.py      # rope_below_height
+|           |       |   +-- events.py            # reset_articulated_rope (knot-aware)
 |           |       +-- agents/
 |           |           +-- rsl_rl_ppo_cfg.py    # PPO hyperparameters
 |           +-- ui_extension_example.py
 |
-|-- tests/                        # Pytest test suite
-|-- examples/                     # Live demo scripts
+|-- tests/                            # Pytest test suite
+|-- examples/
 |   +-- live_perception_demo.py
-|-- PIPELINE.md                   # (Legacy — replaced by this file)
-|-- Workflow.md                   # This file
-+-- pyproject.toml                # Python project metadata
+|-- Workflow.md                       # This file
++-- pyproject.toml                    # Python project metadata
 ```
 
 ---
@@ -718,7 +724,38 @@ configurations:
 
 This puts the arm in a neutral pose above the table.
 
-### 6.4 The Sandbox Scene
+### 6.4 The Articulated Rope Chain
+
+**Files:** `assets/generate_rope_urdf.py`, `assets/rope_config.py`
+
+The rope is modelled as an **articulated chain** — 16 rigid cylindrical
+segments connected by 15 two-DOF revolute joints (pitch + yaw per hinge).
+This is a rigid-body approximation that is faster than FEM deformable
+simulation and simpler to reset and control via joint angles.
+
+**Rope geometry:**
+- 16 segments, each a cylinder with radius 0.005 m
+- Total length: 0.45 m (~0.028 m per segment)
+- 30 joints total: `rope_pitch_0..14` and `rope_yaw_0..14`
+- Joint limits: ±120° (±2.094 rad) per axis
+- Visual: Green → Yellow → Red → Blue gradient across segments
+
+**URDF generation** (`generate_rope_urdf.py`):
+The URDF is generated programmatically, not hand-authored. Each segment
+has mass computed from `density=5000 kg/m³`, and each hinge is a
+massless link connecting two revolute joints.
+
+**Configuration factory** (`rope_config.py`):
+`create_rope_articulation_cfg()` converts the URDF to USD (once, cached)
+and returns an `ArticulationCfg` with passive actuators (low stiffness,
+low damping). Self-collisions are disabled.
+
+**Key constants** (exported from `rope_config.py`):
+- `ROPE_NUM_SEGMENTS = 16`
+- `ROPE_ALL_JOINT_NAMES` — interleaved list of 30 joint names
+- `ROPE_DEFAULT_JOINT_POS` — all zeros (straight rope)
+
+### 6.5 The Sandbox Scene
 
 **File:** `isaaclab/RopeUntyingRobot/scripts/so100_sandbox.py`
 
@@ -729,27 +766,80 @@ the perception pipeline on simulated images:
 |--------|------|---------|
 | Ground plane | Kinematic cuboid | 4 x 4 m, dark grey |
 | SO-100 arm | Articulation | From URDF, at world origin |
-| Table | Kinematic cuboid | 0.6 x 0.4 x 0.02 m at (0.25, 0, 0) |
-| Rope | Deformable body | Cylinder, r=5mm, h=30cm, at (0.25, 0, 0.05) |
-| Camera | Sensor | Pinhole, 640x480, mounted on robot base |
+| Table | Kinematic cuboid | 0.6 x 0.4 x 0.06 m at (0.25, 0, -0.02) |
+| Rope | Articulated chain | 16 segments, 30 joints, at (0.25, 0, 0.05) |
+| Top-down camera | Pinhole sensor | 640x480, mounted on robot base, looks straight down |
+| Side camera | Pinhole sensor | 640x480, mounted on robot base offset, looks along +Y |
 | Dome light | Light | 3000 intensity |
 
-The rope is a **deformable body** (soft body simulated with FEM — finite
-element method). Key physics parameters:
-- `youngs_modulus=50000` (50 kPa) — how stiff the rope is
-- `poissons_ratio=0.45` — how much it bulges when compressed
-- `density=500 kg/m3` — mass
-- `simulation_hexahedral_resolution=6` — FEM mesh density
+**Dual-camera system:**
 
-On each simulation step, the script:
+The sandbox has two cameras, each attached to the robot base link:
+
+1. **Top-down camera** — offset `(0.25, 0.0, 0.50)`, rotation
+   `(1,0,0,0)` ROS convention. Looks straight down at the table.
+   Used for running the perception pipeline (rope segmentation,
+   keypoints, skeletonization).
+
+2. **Side camera** — offset `(0.25, -0.60, 0.15)`, rotation
+   `(0.7071, 0.7071, 0, 0)` ROS convention (90° about X). Looks
+   along +Y toward the scene. Provides a side profile of the arm
+   relative to the table and rope — useful for pose estimation.
+
+Both cameras use the same pinhole intrinsics (focal length 24 mm,
+horizontal aperture 20.955 mm). Resolution is configurable via
+`--camera_width` and `--camera_height` CLI arguments.
+
+The `_compose_dual_view()` helper horizontally concatenates the top-down
+perception overlay (left) and raw side-view RGB (right) with text labels.
+This composite is saved as `latest.png` and timestamped frame files.
+
+**FOV visualization:** `_spawn_camera_fov_prims()` creates guide-purpose
+USD sphere prims outlining both camera frustums: cyan for the top-down
+camera, orange for the side camera. These are visible in the viewport
+but invisible to camera render products.
+
+**Simulation loop:**
+
+On each step, the script:
 1. Holds the arm at its default pose
-2. Captures the camera RGB image
-3. Runs the full OpenCV perception pipeline on that image
-4. Logs rope COM position + perception metrics
-5. Optionally saves visualisation frames to disk
+2. Captures RGB from both cameras
+3. Runs the full perception pipeline on the top-down image
+4. Extracts the raw side-view image (no perception processing)
+5. Composes the dual-view composite
+6. Logs rope COM position + perception metrics
+7. Optionally saves the composite to disk
 
-This validates that perception code works on synthetic images and that
-the sim scene parameters produce a visible rope.
+### 6.6 Sandbox Keyboard Controller
+
+**Class:** `RopeKeyboardController` in `so100_sandbox.py`
+
+An interactive controller that lets you move and bend the rope during
+simulation using keyboard keys:
+
+| Key | Action |
+|-----|--------|
+| I / K | Move rope forward / backward (X) |
+| J / L | Move rope left / right (Y) |
+| U / O | Move rope up / down (Z) |
+| , / . | Select previous / next hinge joint |
+| W / S | Bend pitch of selected joint (+/-) |
+| A / D | Bend yaw of selected joint (+/-) |
+| R | Reset rope to spawn position (straighten all joints) |
+| P | Save current joint angles as a knot config YAML |
+
+Each keypress bends the selected joint by ~10° (0.174 rad). A bright
+magenta sphere marker shows which hinge is currently selected.
+
+**Saving knot configs (P key):** Pressing P reads the current joint
+positions from the simulation, maps them to joint names, and writes a
+timestamped YAML file to `assets/knot_configs/` (e.g.,
+`knot_20260331_142530.yaml`). This is the primary workflow for
+creating knot configurations — see
+[Section 9: Knot Configuration System](#9-knot-configuration-system).
+
+A floating HUD window ("Rope Controls") displays all available keyboard
+controls during the simulation.
 
 ---
 
@@ -770,16 +860,19 @@ defined as config classes.
 
 ### 7.2 Scene
 
-The scene reuses the sandbox parameters with two additions:
+The scene uses the same robot, table, and articulated rope as the
+sandbox, plus one addition:
 
 - A **FrameTransformer** sensor that tracks the position of the
   `gripper` link relative to the robot `base`. This gives the RL agent
   a clean end-effector position signal without the agent needing to
   solve forward kinematics.
 
-- `replicate_physics=False` — required because deformable bodies cannot
-  be cloned with `replicate_physics`. Each of the 64 parallel
-  environments gets its own independent rope.
+The RL scene does **not** include cameras — observations are
+proprioceptive (joint states + rope COM + end-effector position). The
+scene uses `replicate_physics=True` since the articulated rope chain
+(unlike FEM deformable bodies) supports physics replication across
+parallel environments.
 
 ```python
 ee_frame = FrameTransformerCfg(
@@ -831,18 +924,18 @@ The agent receives 21 numbers every step:
 | `ee_pos` | 3 | Custom `mdp.ee_pos_w` | Where the gripper is in world (x,y,z) |
 | `last_action` | 5 | Built-in `mdp.last_action` | What action was taken last step |
 
-**Why rope COM instead of all nodes?** The deformable rope has ~100-200
-mesh vertices. Feeding all 300-600 coordinates as observations would be
-noisy and redundant for a simple reaching task. The centre-of-mass (mean
-of all vertex positions) is a clean 3D target. Future phases will add
-individual node positions for more complex tasks.
+**Why rope COM instead of all bodies?** The articulated rope chain has
+31 bodies (16 segments + 15 hinges). Feeding all 93 coordinates as
+observations would be noisy and redundant for a simple reaching task.
+The centre-of-mass (mean of all body positions) is a clean 3D target.
+Future phases will add individual body positions for more complex tasks.
 
 **Custom observation functions** (`mdp/observations.py`):
 
 ```python
 def rope_com_pos(env, asset_cfg=SceneEntityCfg("rope")) -> torch.Tensor:
     rope = env.scene[asset_cfg.name]
-    return rope.data.nodal_pos_w.mean(dim=1)   # (num_envs, 3)
+    return rope.data.body_pos_w.mean(dim=1)    # (num_envs, 3)
 
 def ee_pos_w(env, sensor_cfg=SceneEntityCfg("ee_frame")) -> torch.Tensor:
     sensor = env.scene[sensor_cfg.name]
@@ -871,6 +964,8 @@ even when the gripper starts far from the rope.
 
 ### 7.6 Reset and Termination
 
+**File:** `mdp/events.py` — `reset_articulated_rope()`
+
 **Resets** (what happens at the start of each episode):
 
 - **Arm joints** — Reset to the default pose multiplied by a random
@@ -878,10 +973,29 @@ even when the gripper starts far from the rope.
   configurations so the policy generalises instead of memorising one
   trajectory.
 
-- **Rope** — The deformable body's node positions are reset to their
-  default values plus a random XY offset of up to +/-5 cm. The Z offset
-  is zero (rope starts on the table). This means the rope appears in a
-  slightly different position each episode.
+- **Rope** — The articulated rope chain is reset via
+  `reset_articulated_rope()`, which applies three layers of
+  randomization:
+
+  1. **Global position offset** — Random XY shift of up to ±5 cm.
+     The Z offset is zero (rope starts on the table).
+  2. **Z-axis rotation** — Random angle between 0 and 2π so the
+     rope can face any direction.
+  3. **Joint angle noise** — Gaussian noise (σ=0.05 rad by default)
+     added to each of the 30 joint angles, creating random bends.
+
+  When a **knot configuration** is provided via the `base_joint_pos`
+  parameter, the joint angles start from the knot shape instead of
+  the default straight configuration. Noise is then added on top, so
+  each parallel environment gets a slightly different variation of
+  the same knot. See [Section 9](#9-knot-configuration-system) for
+  details on defining and using knot configs.
+
+  The reset writes the root state and joint state to the simulation:
+  ```python
+  asset.write_root_state_to_sim(root_state, env_ids=env_ids)
+  asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+  ```
 
 **Terminations** (what ends an episode early):
 
@@ -897,7 +1011,7 @@ even when the gripper starts far from the rope.
 ```python
 def rope_below_height(env, min_height=-0.05, asset_cfg=SceneEntityCfg("rope")):
     rope = env.scene[asset_cfg.name]
-    rope_com_z = rope.data.nodal_pos_w.mean(dim=1)[:, 2]
+    rope_com_z = rope.data.body_pos_w.mean(dim=1)[:, 2]
     return rope_com_z < min_height
 ```
 
@@ -1006,15 +1120,126 @@ then runs the policy in a loop.
 ### 8.4 Other Scripts
 
 - **`list_envs.py`** — Prints all registered environments in a table.
-- **`perception_viewer.py`** — A Tkinter window that polls
-  `output/so100_preprocess/latest.png` and displays it. Run alongside
-  `so100_sandbox.py --show` to see perception output in real time.
-- **`so100_sandbox.py`** — The interactive sandbox scene (see
-  [Section 6.4](#64-the-sandbox-scene)).
+
+- **`perception_viewer.py`** — An OpenCV window that polls
+  `output/so100_preprocess/latest.png` for modification time changes
+  and displays the dual-view composite (top-down perception on the left,
+  side-view on the right). Run alongside `so100_sandbox.py --show` to
+  see perception output in real time. Auto-resizes if the composite
+  exceeds 1920px wide.
+
+  ```bash
+  python scripts/perception_viewer.py           # default path
+  python scripts/perception_viewer.py --fps 15  # slower refresh
+  ```
+
+- **`so100_sandbox.py`** — The interactive sandbox scene with dual
+  cameras and keyboard rope controller (see
+  [Section 6.5](#65-the-sandbox-scene) and
+  [Section 6.6](#66-sandbox-keyboard-controller)).
+
+  ```bash
+  python scripts/so100_sandbox.py --show --max_steps 200
+  ```
 
 ---
 
-## 9. Tests
+## 9. Knot Configuration System
+
+The knot configuration system lets you define specific rope shapes
+(knots) as joint angle presets, save them to YAML files, and use them
+as episode starting configurations during RL training.
+
+### 9.1 Overview
+
+A knot configuration is a YAML file containing the 30 joint angles
+(15 pitch + 15 yaw) that define a rope shape. The primary workflow:
+
+1. Run the sandbox with the keyboard controller
+2. Bend the rope into a desired knot shape using the joint controls
+3. Press **P** to save the current joint angles as a knot config YAML
+4. Reference that YAML in the RL environment's `EventCfg` to train
+   against that knot shape
+
+### 9.2 YAML Format
+
+Knot config files live in `assets/knot_configs/`. Each file contains:
+
+```yaml
+name: overhand_knot
+description: Simple overhand knot for untying training
+joint_angles:
+  rope_pitch_0: 0.0
+  rope_yaw_0: 0.3
+  rope_pitch_1: 0.5
+  rope_yaw_1: -0.2
+  ...all 30 joints...
+```
+
+A `straight.yaml` default config (all zeros) is included as a reference.
+
+### 9.3 Loading and Saving
+
+**File:** `assets/rope_config.py`
+
+**Loading:**
+```python
+from rope_config import load_knot_config
+
+angles = load_knot_config("overhand.yaml")         # relative to knot_configs/
+angles = load_knot_config("/absolute/path/knot.yaml")  # absolute path
+```
+
+The loader validates that all 30 joint names are present and that values
+are within the ±2.094 rad joint limits.
+
+**Saving:**
+```python
+from rope_config import save_knot_config
+
+save_knot_config(
+    joint_angles={"rope_pitch_0": 0.3, ...},
+    path="my_knot.yaml",         # saved to knot_configs/my_knot.yaml
+    name="my_knot",
+    description="A custom knot shape.",
+)
+```
+
+### 9.4 Using Knot Configs in RL Training
+
+To train against a specific knot shape, load the config and pass it
+to the `EventCfg`:
+
+```python
+# In ropeuntyingrobot_env_cfg.py:
+from rope_config import load_knot_config
+
+@configclass
+class EventCfg:
+    reset_rope = EventTerm(
+        func=mdp.reset_articulated_rope,
+        mode="reset",
+        params={
+            "base_joint_pos": load_knot_config("overhand.yaml"),
+            "joint_noise_std": 0.08,  # More noise for diversity
+            ...
+        },
+    )
+```
+
+When `base_joint_pos` is set, every environment starts each episode
+with the rope in the specified knot shape, plus per-environment
+Gaussian noise on the joint angles. This prevents the policy from
+overfitting to exactly one configuration while keeping the general
+knot topology consistent.
+
+When `base_joint_pos` is `None` (the default), the rope starts
+straight with only noise — this preserves backward compatibility with
+the existing `RopeReach-SO100-v0` environment.
+
+---
+
+## 10. Tests
 
 **Directory:** `tests/`
 
@@ -1044,9 +1269,9 @@ pytest tests/ -v
 
 ---
 
-## 10. Running the Project
+## 11. Running the Project
 
-### 10.1 Prerequisites
+### 11.1 Prerequisites
 
 | Component | Required for | Install |
 |-----------|-------------|---------|
@@ -1059,7 +1284,7 @@ pytest tests/ -v
 | RSL-RL >= 3.0.1 | PPO training | `pip install rsl-rl-lib` |
 | PyTorch + CUDA | RL training | Bundled with Isaac Lab |
 
-### 10.2 Quick Start
+### 11.2 Quick Start
 
 **Run perception tests (no GPU needed):**
 ```bash
@@ -1071,9 +1296,13 @@ pytest tests/ -v
 python examples/live_perception_demo.py
 ```
 
-**Run the sandbox scene (requires Isaac Lab):**
+**Run the sandbox scene with dual cameras (requires Isaac Lab):**
 ```bash
-python isaaclab/RopeUntyingRobot/scripts/so100_sandbox.py --headless --max_steps 100
+# Terminal 1: sandbox with dual-camera view + keyboard rope control
+python isaaclab/RopeUntyingRobot/scripts/so100_sandbox.py --show --max_steps 200
+
+# Terminal 2: live viewer (displays top-down + side-view composite)
+python isaaclab/RopeUntyingRobot/scripts/perception_viewer.py
 ```
 
 **Train the RL agent:**
@@ -1089,7 +1318,7 @@ python scripts/rsl_rl/play.py --task RopeReach-SO100-v0 --num_envs 4
 
 ---
 
-## 11. Phased Roadmap
+## 12. Phased Roadmap
 
 The project follows a bottom-up approach — each phase validates a
 harder capability before moving to the next.
@@ -1099,9 +1328,10 @@ harder capability before moving to the next.
 | **1** | **Reach the rope** — move gripper to rope COM | Implemented |
 | **2** | **Grasp and displace** — pick up a rope end, move to a target | Planned |
 | **3** | **Straighten rope** — pull a curved rope into a line | Planned |
-| **4** | **Knot untying** — untie a specific pre-tied knot | Planned (requires pre-knotted USD asset) |
+| **4** | **Knot untying** — untie a specific pre-tied knot | Planned (knot config system implemented — see [Section 9](#9-knot-configuration-system)) |
 
 Phase 1 validates that the full stack works: scene spawning, action
 space, observations, rewards, resets, and the PPO training pipeline. The
-later phases add increasingly complex rewards and require solving open
-problems (e.g., creating a pre-knotted rope asset for Phase 4).
+later phases add increasingly complex rewards and task-specific
+observation terms. Phase 4 can now use the knot configuration system to
+initialize episodes with pre-tied knot shapes.
