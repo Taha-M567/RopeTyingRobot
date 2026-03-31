@@ -2,12 +2,19 @@
 
 Converts the generated URDF to USD and provides an ``ArticulationCfg``
 factory function, mirroring the pattern in ``so100_config.py``.
+
+Also provides utilities for loading and saving knot configurations
+(joint angle presets) from YAML files.
 """
 
 from __future__ import annotations
 
+import logging
+import math
 import sys
 from pathlib import Path
+
+import yaml
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
@@ -40,6 +47,13 @@ ROPE_SEGMENT_BODY_NAMES = [f"rope_seg_{i}" for i in range(ROPE_NUM_SEGMENTS)]
 ROPE_HINGE_BODY_NAMES = [f"rope_hinge_{i}" for i in range(ROPE_NUM_SEGMENTS - 1)]
 
 ROPE_DEFAULT_JOINT_POS: dict[str, float] = {name: 0.0 for name in ROPE_ALL_JOINT_NAMES}
+
+# Joint limits (from generate_rope_urdf: ±120 deg).
+ROPE_JOINT_LIMIT_RAD = math.radians(120.0)
+
+KNOT_CONFIGS_DIR = _SELF_DIR / "knot_configs"
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -142,3 +156,99 @@ def create_rope_articulation_cfg(
             ),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Knot configuration I/O
+# ---------------------------------------------------------------------------
+def load_knot_config(path: str | Path) -> dict[str, float]:
+    """Load a knot configuration from a YAML file.
+
+    The YAML must contain a ``joint_angles`` mapping with all 30 rope
+    joint names as keys and angle values (radians) within the joint
+    limits (±2.094 rad).
+
+    Args:
+        path: Path to the YAML file.  If a plain filename (no
+            directory separator), it is resolved relative to the
+            ``assets/knot_configs/`` directory.
+
+    Returns:
+        Dict mapping joint names to angle values (radians).
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: On missing joints or out-of-range angles.
+    """
+    p = Path(path)
+    if not p.is_absolute() and p.parent == Path("."):
+        p = KNOT_CONFIGS_DIR / p
+
+    if not p.exists():
+        raise FileNotFoundError(f"Knot config not found: {p}")
+
+    with open(p) as f:
+        data = yaml.safe_load(f)
+
+    angles: dict[str, float] = data.get("joint_angles", {})
+
+    # Validate: all joints present.
+    expected = set(ROPE_ALL_JOINT_NAMES)
+    got = set(angles.keys())
+    missing = expected - got
+    if missing:
+        raise ValueError(
+            f"Knot config {p.name} is missing joints: "
+            f"{sorted(missing)}"
+        )
+
+    # Validate: values within joint limits.
+    limit = ROPE_JOINT_LIMIT_RAD
+    for name, val in angles.items():
+        if abs(val) > limit:
+            raise ValueError(
+                f"Joint {name}={val:.4f} rad exceeds limit "
+                f"±{limit:.4f} rad in {p.name}"
+            )
+
+    logger.info("Loaded knot config '%s' from %s", data.get("name", "?"), p)
+    return {k: float(v) for k, v in angles.items()}
+
+
+def save_knot_config(
+    joint_angles: dict[str, float],
+    path: str | Path,
+    name: str = "custom",
+    description: str = "",
+) -> Path:
+    """Save a knot configuration to a YAML file.
+
+    Args:
+        joint_angles: Dict mapping joint names to angles (radians).
+        path: Output file path.  If a plain filename, resolved
+            relative to ``assets/knot_configs/``.
+        name: Human-readable name stored in the YAML.
+        description: Optional description stored in the YAML.
+
+    Returns:
+        The resolved output path.
+    """
+    p = Path(path)
+    if not p.is_absolute() and p.parent == Path("."):
+        p = KNOT_CONFIGS_DIR / p
+
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    data = {
+        "name": name,
+        "description": description,
+        "joint_angles": {
+            k: round(float(v), 6) for k, v in joint_angles.items()
+        },
+    }
+
+    with open(p, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    logger.info("Saved knot config '%s' to %s", name, p)
+    return p

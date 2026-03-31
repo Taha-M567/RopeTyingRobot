@@ -3,6 +3,9 @@
 Run this in a separate terminal while so100_sandbox.py is running
 with --show.  Uses OpenCV (already a project dependency).
 
+Displays a dual-view composite: top-down (perception overlay) on the
+left and side-view (arm pose) on the right.
+
 Usage:
     python scripts/perception_viewer.py
     python scripts/perception_viewer.py --image path/to/latest.png
@@ -22,7 +25,8 @@ DEFAULT_IMAGE = (
     / "latest.png"
 )
 
-WINDOW_NAME = "SO100 Perception"
+WINDOW_NAME = "SO100 Perception (Dual View)"
+MAX_DISPLAY_WIDTH = 1920
 
 
 def main() -> None:
@@ -57,6 +61,13 @@ def main() -> None:
             if mtime != last_mtime:
                 img = cv2.imread(str(image_path))
                 if img is not None:
+                    h_img, w_img = img.shape[:2]
+                    if w_img > MAX_DISPLAY_WIDTH:
+                        scale = MAX_DISPLAY_WIDTH / w_img
+                        img = cv2.resize(
+                            img,
+                            (MAX_DISPLAY_WIDTH, int(h_img * scale)),
+                        )
                     cv2.imshow(WINDOW_NAME, img)
                     last_mtime = mtime
 

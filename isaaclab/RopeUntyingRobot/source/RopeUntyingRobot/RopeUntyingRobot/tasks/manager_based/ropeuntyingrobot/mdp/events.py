@@ -25,6 +25,7 @@ def reset_articulated_rope(
     position_offset_range: dict[str, tuple[float, float]],
     rotation_range: tuple[float, float] = (0.0, 2.0 * math.pi),
     joint_noise_std: float = 0.05,
+    base_joint_pos: dict[str, float] | None = None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("rope"),
 ) -> None:
     """Reset the articulated rope chain with randomized root pose and joint angles.
@@ -38,6 +39,12 @@ def reset_articulated_rope(
     3. **Joint angle noise** — adds small Gaussian noise to each
        joint's position, creating random bends along the chain.
 
+    When *base_joint_pos* is given, the joint angles are initialized
+    to those values (a knot configuration) instead of the articulation
+    default (straight rope).  Gaussian noise is then added on top,
+    so each parallel environment starts with a slightly different
+    variation of the same knot.
+
     Args:
         env: The environment instance.
         env_ids: Tensor of environment indices being reset.
@@ -48,6 +55,10 @@ def reset_articulated_rope(
             random Z-axis rotation.
         joint_noise_std: Standard deviation (in radians) of Gaussian
             noise added to each joint angle. Set to ``0.0`` to disable.
+        base_joint_pos: Optional dict mapping joint names to base
+            angles (radians).  Typically loaded from a knot config
+            YAML via ``rope_config.load_knot_config()``.  When
+            ``None``, uses the articulation's default joint positions.
         asset_cfg: Scene entity configuration identifying the rope
             asset.
     """
@@ -81,11 +92,20 @@ def reset_articulated_rope(
 
     asset.write_root_state_to_sim(root_state, env_ids=env_ids)
 
-    # -- Joint state: default positions + Gaussian noise, zero velocity --
+    # -- Joint state --
     joint_pos = asset.data.default_joint_pos[env_ids].clone()
-    joint_vel = torch.zeros_like(joint_pos)
 
+    # Override with knot configuration when provided.
+    if base_joint_pos is not None:
+        joint_names = asset.joint_names
+        for name, val in base_joint_pos.items():
+            if name in joint_names:
+                idx = joint_names.index(name)
+                joint_pos[:, idx] = val
+
+    # Add per-environment Gaussian noise for diversity.
     if joint_noise_std > 0.0:
         joint_pos += torch.randn_like(joint_pos) * joint_noise_std
 
+    joint_vel = torch.zeros_like(joint_pos)
     asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)

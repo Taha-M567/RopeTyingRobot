@@ -1,0 +1,35 @@
+name: straight
+description: >-
+  Default straight rope configuration (all joints at zero).
+  Use as a reference — the rope lies flat along its X axis.
+joint_angles:
+  rope_pitch_0: 0.0
+  rope_yaw_0: 0.0
+  rope_pitch_1: 0.0
+  rope_yaw_1: 0.0
+  rope_pitch_2: 0.0
+  rope_yaw_2: 0.0
+  rope_pitch_3: 0.0
+  rope_yaw_3: 0.0
+  rope_pitch_4: 0.0
+  rope_yaw_4: 0.0
+  rope_pitch_5: 0.0
+  rope_yaw_5: 0.0
+  rope_pitch_6: 0.0
+  rope_yaw_6: 0.0
+  rope_pitch_7: 0.0
+  rope_yaw_7: 0.0
+  rope_pitch_8: 0.0
+  rope_yaw_8: 0.0
+  rope_pitch_9: 0.0
+  rope_yaw_9: 0.0
+  rope_pitch_10: 0.0
+  rope_yaw_10: 0.0
+  rope_pitch_11: 0.0
+  rope_yaw_11: 0.0
+  rope_pitch_12: 0.0
+  rope_yaw_12: 0.0
+  rope_pitch_13: 0.0
+  rope_yaw_13: 0.0
+  rope_pitch_14: 0.0
+  rope_yaw_14: 0.0

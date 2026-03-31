@@ -207,6 +207,8 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import datetime
+
 import carb.input
 import cv2
 import numpy as np
@@ -221,7 +223,12 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 
-from rope_config import ROPE_NUM_SEGMENTS, create_rope_articulation_cfg
+from rope_config import (
+    ROPE_ALL_JOINT_NAMES,
+    ROPE_NUM_SEGMENTS,
+    create_rope_articulation_cfg,
+    save_knot_config,
+)
 from generate_rope_urdf import _interpolate_color
 from so100_config import create_so100_articulation_cfg
 from src.perception.keypoint_detection import detect_keypoints
@@ -247,6 +254,7 @@ class RopeKeyboardController:
 
     Other:
         R      — reset rope to spawn position and straighten all joints
+        P      — save current rope joint angles as a knot config YAML
     """
 
     _NUM_HINGES = ROPE_NUM_SEGMENTS - 1
@@ -263,6 +271,7 @@ class RopeKeyboardController:
         self._default_pos = default_pos
         self._offset = [0.0, 0.0, 0.0]
         self._reset = False
+        self._save_config = False
 
         # Joint bending state: track target angles for every joint.
         num_joints = self._NUM_HINGES * 2  # pitch + yaw per hinge
@@ -319,6 +328,7 @@ class RopeKeyboardController:
                 ui.Spacer(height=4)
                 ui.Label("  OTHER", style=_title)
                 ui.Label("    R            Reset all", style=_key)
+                ui.Label("    P            Save knot config", style=_key)
                 ui.Spacer(height=6)
                 self._hinge_label = ui.Label(
                     f"  Hinge: 0 / {self._NUM_HINGES - 1}",
@@ -378,6 +388,10 @@ class RopeKeyboardController:
         elif k == carb.input.KeyboardInput.R:
             self._reset = True
 
+        # --- save knot config ---
+        elif k == carb.input.KeyboardInput.P:
+            self._save_config = True
+
         return True
 
     def apply(self) -> None:
@@ -425,6 +439,23 @@ class RopeKeyboardController:
             )
             rope.set_joint_position_target(targets)
             self._joints_dirty = False
+
+        # Save current joint angles as a knot config YAML.
+        if self._save_config:
+            joint_pos = rope.data.joint_pos[0]  # (num_joints,)
+            angles: dict[str, float] = {}
+            for i, name in enumerate(ROPE_ALL_JOINT_NAMES):
+                angles[name] = joint_pos[i].item()
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"knot_{timestamp}.yaml"
+            path = save_knot_config(
+                joint_angles=angles,
+                path=filename,
+                name=f"knot_{timestamp}",
+                description="Saved from sandbox keyboard controller.",
+            )
+            logger.info("Knot config saved → %s", path)
+            self._save_config = False
 
         # Update hinge selection marker.
         # Body order: seg_0, hinge_0, seg_1, hinge_1, ...
@@ -491,6 +522,28 @@ class So100PerceptionSceneCfg(InteractiveSceneCfg):
         offset=CameraCfg.OffsetCfg(
             pos=(0.25, 0.0, 0.50),
             rot=(1.0, 0.0, 0.0, 0.0),
+            convention="ros",
+        ),
+    )
+
+    # Side-view camera: observes arm pose relative to table and rope.
+    # Mounted on robot base (fixed at origin, so offset = world position).
+    # Looks along +Y toward the scene; right = +X, up = +Z.
+    side_camera = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base/side_camera",
+        update_period=0.0,
+        height=args_cli.camera_height,
+        width=args_cli.camera_width,
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.05, 10.0),
+        ),
+        offset=CameraCfg.OffsetCfg(
+            pos=(0.25, -0.60, 0.15),
+            rot=(0.7071, 0.7071, 0.0, 0.0),
             convention="ros",
         ),
     )
@@ -592,6 +645,35 @@ def _draw_pipeline_overlay(
     return vis
 
 
+def _compose_dual_view(
+    top_down: np.ndarray,
+    side_view: np.ndarray | None,
+) -> np.ndarray:
+    """Horizontally concatenate top-down and side-view camera frames.
+
+    The side view is resized to match the top-down height.  Text labels
+    are drawn on each half.  Returns *top_down* unchanged when
+    *side_view* is ``None`` (camera not yet ready).
+    """
+    label_color = (255, 255, 255)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    cv2.putText(top_down, "Top-Down", (10, 25), font, 0.6, label_color, 2)
+
+    if side_view is None:
+        return top_down
+
+    h_td = top_down.shape[0]
+    h_sv, w_sv = side_view.shape[:2]
+    if h_sv != h_td:
+        scale = h_td / h_sv
+        side_view = cv2.resize(side_view, (int(w_sv * scale), h_td))
+
+    cv2.putText(side_view, "Side View", (10, 25), font, 0.6, label_color, 2)
+
+    return np.hstack([top_down, side_view])
+
+
 def _run_perception_pipeline(
     frame_bgr: np.ndarray,
     perception_cfg: dict[str, Any],
@@ -678,25 +760,17 @@ def _spawn_camera_fov_prims(
     cam_width: int,
     cam_height: int,
 ) -> None:
-    """Spawn permanent USD sphere prims outlining the camera frustum and table footprint.
+    """Spawn permanent USD sphere prims outlining camera frustums.
 
     Must be called BEFORE ``sim.reset()`` so the Fabric Scene Delegate
-    picks up the new geometry.  Uses the known camera config pose rather
+    picks up the new geometry.  Uses the known camera config poses rather
     than sensor data (which is not populated until after reset).
+
+    Spawns frustum markers for both the top-down and side-view cameras.
     """
     from pxr import Gf, UsdGeom
 
-    # Camera world pose — must match CameraCfg offset in So100PerceptionSceneCfg.
-    # offset pos=(0.25, 0.0, 0.50), rot=(1,0,0,0) ROS convention (180° about X).
-    # Robot base is at the world origin, so camera world pos equals offset pos.
-    # The camera looks straight down (-Z), right is +X, image-up is +Y.
-    cam_pos = np.array([0.25, 0.0, 0.50])
-
-    # OpenGL rotation matrix for top-down camera is identity:
-    # right=(1,0,0), up=(0,1,0), -forward=(0,0,1) → camera looks along -Z.
-    R = np.eye(3)
-
-    # Camera intrinsics (must match PinholeCameraCfg in scene config).
+    # Shared camera intrinsics (must match PinholeCameraCfg in scene config).
     focal_length = 24.0
     h_aperture = 20.955
     w, h = cam_width, cam_height
@@ -704,76 +778,114 @@ def _spawn_camera_fov_prims(
     fy = fx
     cx, cy = w / 2.0, h / 2.0
 
-    # Normalised ray directions for 4 image corners (OpenGL: -Z forward).
-    corners_px = [(0, 0), (w, 0), (w, h), (0, h)]
-    ray_dirs: list[np.ndarray] = []
-    for u, v in corners_px:
-        rc = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
-        rc /= np.linalg.norm(rc)
-        ray_dirs.append(R @ rc)
-
-    # Frustum far-plane corners.
-    depth = 0.40
-    far_pts = [cam_pos + depth * d for d in ray_dirs]
-
-    # Build points along frustum edges (dotted line effect).
-    pts: list[np.ndarray] = []
+    stage = sim.stage
     n_per = 8
-
-    # Camera → each far corner (4 edges).
-    for fp in far_pts:
-        for j in range(n_per + 1):
-            t = j / n_per
-            pts.append(cam_pos * (1 - t) + fp * t)
-
-    # Far-plane rectangle (4 edges).
-    for i in range(4):
-        p0, p1 = far_pts[i], far_pts[(i + 1) % 4]
-        for j in range(1, n_per):
-            t = j / n_per
-            pts.append(p0 * (1 - t) + p1 * t)
-
-    # Table-surface footprint.
     table_z = 0.01
-    table_pts: list[np.ndarray] = []
-    for d in ray_dirs:
-        if abs(d[2]) > 1e-6:
-            tv = (table_z - cam_pos[2]) / d[2]
-            if tv > 0:
-                table_pts.append(cam_pos + tv * d)
-    if len(table_pts) >= 2:
-        for i in range(len(table_pts)):
-            p0 = table_pts[i]
-            p1 = table_pts[(i + 1) % len(table_pts)]
+
+    def _spawn_single_fov(
+        cam_pos: np.ndarray,
+        R: np.ndarray,
+        xform_path: str,
+        mat_name: str,
+        diffuse: tuple[float, float, float],
+        emissive: tuple[float, float, float],
+        depth: float = 0.40,
+    ) -> int:
+        """Spawn frustum sphere prims for one camera. Returns prim count."""
+        # Normalised ray directions for 4 image corners (OpenGL: -Z forward).
+        corners_px = [(0, 0), (w, 0), (w, h), (0, h)]
+        ray_dirs: list[np.ndarray] = []
+        for u, v in corners_px:
+            rc = np.array([(u - cx) / fx, -(v - cy) / fy, -1.0])
+            rc /= np.linalg.norm(rc)
+            ray_dirs.append(R @ rc)
+
+        far_pts = [cam_pos + depth * d for d in ray_dirs]
+
+        pts: list[np.ndarray] = []
+
+        # Camera → each far corner (4 edges).
+        for fp in far_pts:
             for j in range(n_per + 1):
+                t = j / n_per
+                pts.append(cam_pos * (1 - t) + fp * t)
+
+        # Far-plane rectangle (4 edges).
+        for i in range(4):
+            p0, p1 = far_pts[i], far_pts[(i + 1) % 4]
+            for j in range(1, n_per):
                 t = j / n_per
                 pts.append(p0 * (1 - t) + p1 * t)
 
-    # Create cyan emissive material first.
-    mat_path = "/World/Looks/fov_mat"
-    mat_cfg = sim_utils.PreviewSurfaceCfg(
-        diffuse_color=(0.0, 1.0, 1.0),
-        emissive_color=(0.0, 0.5, 0.5),
+        # Table-surface footprint.
+        table_pts: list[np.ndarray] = []
+        for d in ray_dirs:
+            if abs(d[2]) > 1e-6:
+                tv = (table_z - cam_pos[2]) / d[2]
+                if tv > 0:
+                    table_pts.append(cam_pos + tv * d)
+        if len(table_pts) >= 2:
+            for i in range(len(table_pts)):
+                p0 = table_pts[i]
+                p1 = table_pts[(i + 1) % len(table_pts)]
+                for j in range(n_per + 1):
+                    t = j / n_per
+                    pts.append(p0 * (1 - t) + p1 * t)
+
+        # Material.
+        mat_path = f"/World/Looks/{mat_name}"
+        mat_cfg = sim_utils.PreviewSurfaceCfg(
+            diffuse_color=diffuse,
+            emissive_color=emissive,
+        )
+        mat_cfg.func(mat_path, mat_cfg)
+
+        # Spawn spheres under a guide-purpose Xform.
+        xform = UsdGeom.Xform.Define(stage, xform_path)
+        xform.GetPurposeAttr().Set("guide")
+        for i, pt in enumerate(pts):
+            pp = f"{xform_path}/s{i}"
+            sphere = UsdGeom.Sphere.Define(stage, pp)
+            sphere.GetRadiusAttr().Set(0.01)
+            sphere.AddTranslateOp().Set(
+                Gf.Vec3d(float(pt[0]), float(pt[1]), float(pt[2]))
+            )
+            sim_utils.bind_visual_material(pp, mat_path)
+
+        return len(pts)
+
+    # --- Top-down camera (cyan) ---
+    # pos=(0.25, 0.0, 0.50), identity rotation → looks along -Z.
+    top_pos = np.array([0.25, 0.0, 0.50])
+    top_R = np.eye(3)
+    n = _spawn_single_fov(
+        top_pos, top_R,
+        "/World/CameraFOV_TopDown", "fov_mat_top",
+        diffuse=(0.0, 1.0, 1.0), emissive=(0.0, 0.5, 0.5),
     )
-    mat_cfg.func(mat_path, mat_cfg)
-
-    # Spawn USD sphere prims under a parent Xform.
-    # purpose="guide" keeps them visible in the viewport but invisible to
-    # camera render products, so the perception pipeline won't detect them.
-    stage = sim.stage
-    xform = UsdGeom.Xform.Define(stage, "/World/CameraFOV")
-    xform.GetPurposeAttr().Set("guide")
-    for i, pt in enumerate(pts):
-        prim_path = f"/World/CameraFOV/s{i}"
-        sphere = UsdGeom.Sphere.Define(stage, prim_path)
-        sphere.GetRadiusAttr().Set(0.01)
-        sphere.AddTranslateOp().Set(Gf.Vec3d(float(pt[0]), float(pt[1]), float(pt[2])))
-        # Bind material per-sphere (parent inheritance unreliable with Fabric).
-        sim_utils.bind_visual_material(prim_path, mat_path)
-
     logger.info(
-        "Camera FOV: spawned %d prims at cam_pos=(%.3f, %.3f, %.3f).",
-        len(pts), *cam_pos,
+        "Top-down FOV: %d prims at (%.3f, %.3f, %.3f).",
+        n, *top_pos,
+    )
+
+    # --- Side camera (orange) ---
+    # pos=(0.25, -0.60, 0.15), 90° about X → looks along +Y.
+    # OpenGL rotation: right=+X, up=+Z, -forward=-Y.
+    side_pos = np.array([0.25, -0.60, 0.15])
+    side_R = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, -1.0, 0.0],
+    ])
+    n = _spawn_single_fov(
+        side_pos, side_R,
+        "/World/CameraFOV_Side", "fov_mat_side",
+        diffuse=(1.0, 0.6, 0.0), emissive=(0.5, 0.3, 0.0),
+        depth=0.50,
+    )
+    logger.info(
+        "Side FOV: %d prims at (%.3f, %.3f, %.3f).",
+        n, *side_pos,
     )
 
 
@@ -824,6 +936,19 @@ def run_simulator(
         frame_bgr = _tensor_rgb_to_bgr(rgb)
         vis, metrics = _run_perception_pipeline(frame_bgr, perception_cfg)
 
+        # Side camera — raw RGB for arm pose observation (no perception).
+        side_frame_bgr = None
+        try:
+            side_output = scene["side_camera"].data.output
+            if "rgb" in side_output:
+                side_rgb = side_output["rgb"][0]
+                if side_rgb.numel() > 0:
+                    side_frame_bgr = _tensor_rgb_to_bgr(side_rgb)
+        except RuntimeError:
+            pass  # Side camera buffers not yet allocated.
+
+        composite = _compose_dual_view(vis, side_frame_bgr)
+
         if step_count % max(1, args_cli.log_interval) == 0:
             rope_pos = scene["rope"].data.body_pos_w
             rope_center = rope_pos.mean(dim=1).squeeze(0)
@@ -842,12 +967,12 @@ def run_simulator(
 
         if args_cli.save_interval > 0 and step_count % args_cli.save_interval == 0:
             frame_path = output_dir / f"frame_{step_count:06d}.png"
-            cv2.imwrite(str(frame_path), vis)
+            cv2.imwrite(str(frame_path), composite)
 
         if args_cli.show:
             # Write latest frame for the external viewer process.
             latest_path = output_dir / "latest.png"
-            cv2.imwrite(str(latest_path), vis)
+            cv2.imwrite(str(latest_path), composite)
 
         step_count += 1
 

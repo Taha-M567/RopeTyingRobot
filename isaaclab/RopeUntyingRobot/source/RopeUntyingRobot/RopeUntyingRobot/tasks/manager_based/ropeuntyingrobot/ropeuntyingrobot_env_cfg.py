@@ -249,6 +249,11 @@ class EventCfg:
             },
             "rotation_range": (0.0, 6.283185307),
             "joint_noise_std": 0.05,
+            # Knot configuration: set to a dict of joint angles
+            # (e.g. via rope_config.load_knot_config("overhand.yaml"))
+            # to initialize the rope in a specific knot shape.
+            # None = straight rope (default joint positions).
+            "base_joint_pos": None,
         },
     )
 
