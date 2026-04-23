@@ -144,6 +144,9 @@ Camera Frame (BGR image)
 [3] Skeletonization ---> binary skeleton (1-pixel-wide centerline)
     |
     v
+[3b] Crossing Analysis -> List[CrossingInfo]  (over/under + patched skeleton)
+    |
+    v
 [4] Graph Extraction --> PathDict  (endpoints, junctions, edges, main_path)
     |
     v
@@ -344,7 +347,81 @@ def skeletonize_rope(mask: np.ndarray, config: dict | None = None) -> np.ndarray
 
 **Output:** A binary image (0/255) the same size as the input mask.
 
-### 3.6 Step 4: Graph Extraction
+### 3.6 Step 3b: Crossing Analysis
+
+**File:** `src/perception/crossing_analysis.py`
+
+**What it does:** Determines which strand is on top (over) and which is
+on the bottom (under) at each crossing point by sampling the original
+colour image. The visible colour at the crossing centre belongs to the
+top strand. It can also patch the skeleton at crossings, replacing
+messy junction clusters with clean traced paths.
+
+**Entry point:**
+```python
+def analyze_crossing_over_under(
+    image: np.ndarray,
+    skeleton: np.ndarray,
+    rope_mask: np.ndarray,
+    config: dict | None = None,
+) -> list[CrossingInfo]
+```
+
+**How it works (5 internal steps):**
+
+1. **Detect crossing regions** (`detect_crossing_regions`) — Uses the
+   distance transform on the rope mask. At a crossing, two strands
+   overlap so the mask is roughly twice as wide as a single strand.
+   Pixels where the distance-to-background exceeds
+   `width_ratio × normal_half_width` are flagged as crossing candidates.
+   Connected components are filtered by area and compactness (aspect
+   ratio < 4).
+
+2. **Find entry/exit points** (`_find_entry_points`) — For each
+   crossing region, finds skeleton pixels just outside the region
+   boundary. A real crossing has 4 entry points (two per strand).
+   Nearby entries are merged to handle messy skeletons.
+
+3. **Sample branch colours** — Traces the skeleton outward from each
+   entry point (up to `color_sample_length` pixels) and samples the
+   mean HSV colour of the rope mask in that neighbourhood. This gives a
+   colour per branch, sampled outside the crossing where the strands
+   are cleanly separated.
+
+4. **Pair branches and classify** — Entries are sorted by angle from
+   the crossing centre and paired by angular opposition (roughly 180°
+   apart). The pair whose mean colour is closer to the colour sampled
+   at the crossing centre is the **over** (top) strand; the other pair
+   is the **under** (bottom) strand. Confidence is based on how
+   distinguishable the two pairs' colour distances are.
+
+5. **Patch skeleton** (`patch_skeleton_at_crossings`) — Optionally
+   replaces the messy skeleton pixels inside each crossing region with
+   clean interpolated paths (one for each strand), giving downstream
+   graph extraction a clean junction to work with.
+
+**Output dataclasses:**
+```python
+@dataclass
+class CrossingRegion:
+    center: tuple[float, float]       # (x, y) centroid
+    bbox: tuple[int, int, int, int]   # (r0, c0, r1, c1)
+    region_mask: np.ndarray           # Boolean mask (full image size)
+    normal_half_width: float          # Estimated single-strand half-width
+
+@dataclass
+class CrossingInfo:
+    position: tuple[float, float]              # Crossing center (x, y)
+    over_strand_path: np.ndarray               # (N, 2) path for top strand
+    under_strand_path: np.ndarray              # (N, 2) path for bottom strand
+    over_color_hsv: tuple[float, float, float] # Mean HSV of top strand
+    under_color_hsv: tuple[float, float, float]# Mean HSV of bottom strand
+    center_color_hsv: tuple[float, float, float]# HSV at crossing center
+    confidence: float                          # 0.0 to 1.0
+    region: CrossingRegion
+```
+
+### 3.7 Step 4: Graph Extraction
 
 **File:** `src/perception/skeletonization.py` (same file as Step 3)
 
@@ -383,7 +460,7 @@ class PathDict(TypedDict):
     main_path: np.ndarray | None       # Single (N, 2) array or None
 ```
 
-### 3.7 Step 5: State Estimation
+### 3.8 Step 5: State Estimation
 
 **File:** `src/perception/state_estimation.py`
 
@@ -413,7 +490,7 @@ class RopeState:
     path_graph: PathDict | None         # Full graph if available
 ```
 
-### 3.8 Step 6: Visualization
+### 3.9 Step 6: Visualization
 
 **File:** `src/perception/visualization.py`
 
@@ -428,7 +505,7 @@ frame:
 - `visualize_result()` — Combines all of the above plus info text
   (frame number, processing time, keypoint counts).
 
-### 3.9 Orchestration: Live Video Processor
+### 3.10 Orchestration: Live Video Processor
 
 **File:** `src/perception/video_processor.py`
 
@@ -459,7 +536,7 @@ The pipeline steps can be individually disabled via config:
 - `perception.pipeline.disable_keypoint_extraction` — skips keypoints
 - `perception.pipeline.disable_skeletonization` — skips skeleton + graph
 
-### 3.10 Perception Config Reference
+### 3.11 Perception Config Reference
 
 All perception tuning parameters live in
 `src/configs/perception_config.yaml`. Here is what each section
@@ -501,7 +578,7 @@ controls:
 | `pre_close_kernel_size` | `5` | Morphological close before thinning |
 | `pre_dilate_kernel_size` | `3` | Dilation before thinning |
 
-### 3.11 Common Tuning Issues
+### 3.12 Common Tuning Issues
 
 **Mask flickers between frames:**
 - Widen `hsv_lower` / `hsv_upper` to capture more of the rope colour.
@@ -1256,6 +1333,7 @@ pytest tests/ -v
 |------|--------|-------|
 | `tests/perception/test_rope_segmentation.py` | Segmentation | `RopeMask` dataclass fields, `segment_rope()` output shape and confidence range, error on invalid input |
 | `tests/perception/test_keypoint_mask.py` | Keypoint mask | `create_keypoint_class_mask()` produces correct class values (0-3) |
+| `tests/perception/test_crossing_analysis.py` | Crossing analysis | Circular hue mean, HSV color distance, branch pairing by color, crossing region detection (thick strands, uniform width, empty/None masks), skeleton entry points, skeleton patching, integration test with synthetic two-color crossing image |
 | `tests/perception/test_skeletonization.py` | Skeletonization | Zhang-Suen thinning, neighbour counting, pruning, junction clustering, graph extraction on lines/T-junctions/curves, performance (<500ms on 640x480) |
 | `tests/utils/test_geometry.py` | Geometry | Distance, rotation+translation transform, angle between vectors |
 
