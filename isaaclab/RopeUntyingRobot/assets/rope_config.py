@@ -57,6 +57,46 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# USD post-processing: adjacent-body collision filter
+# ---------------------------------------------------------------------------
+def _apply_adjacent_body_filter(
+    usd_path: Path,
+    num_segments: int = ROPE_NUM_SEGMENTS,
+) -> None:
+    """Disable self-collisions between adjacent rope segments in the USD.
+
+    PhysX auto-filters direct parent↔child pairs, but seg_i and
+    seg_{i+1} are separated by a hinge link in the kinematic tree, so
+    they are NOT auto-filtered.  Without this filter they collide
+    constantly at the hinge point, causing jitter.
+
+    Uses ``PhysxFilteredPairsAPI`` which stores filtered pairs as a
+    flat relationship list where consecutive path pairs form the
+    disabled collision pairs (element 0↔1, element 2↔3, ...).
+    """
+    from pxr import PhysxSchema, Sdf, Usd
+
+    stage = Usd.Stage.Open(str(usd_path))
+    root_prim = stage.GetDefaultPrim()
+    root_path = root_prim.GetPath()
+
+    filtered_api = PhysxSchema.PhysxFilteredPairsAPI.Apply(root_prim)
+
+    targets = []
+    for i in range(num_segments - 1):
+        targets.append(Sdf.Path(f"{root_path}/rope_seg_{i}"))
+        targets.append(Sdf.Path(f"{root_path}/rope_seg_{i + 1}"))
+
+    filtered_api.GetFilteredPairsRel().SetTargets(targets)
+    stage.Save()
+    logger.info(
+        "Applied adjacent-body collision filter (%d pairs) to %s",
+        num_segments - 1,
+        usd_path.name,
+    )
+
+
+# ---------------------------------------------------------------------------
 # USD conversion
 # ---------------------------------------------------------------------------
 def ensure_rope_usd(
@@ -93,16 +133,22 @@ def ensure_rope_usd(
         fix_base=False,
         merge_fixed_joints=False,
         force_usd_conversion=force_conversion,
+        replace_cylinders_with_capsules=True,
         joint_drive=UrdfConverterCfg.JointDriveCfg(
             gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
-                stiffness=20.0,
-                damping=5.0,
+                stiffness=0.0,
+                damping=0.5,
             ),
-            target_type="position",
+            target_type="none",
         ),
     )
     converter = UrdfConverter(converter_cfg)
-    return Path(converter.usd_path)
+    result_path = Path(converter.usd_path)
+
+    # Post-process: disable collisions between adjacent segments.
+    _apply_adjacent_body_filter(result_path, num_segments=ROPE_NUM_SEGMENTS)
+
+    return result_path
 
 
 # ---------------------------------------------------------------------------
@@ -127,20 +173,22 @@ def create_rope_articulation_cfg(
             usd_path=str(usd_path),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,
-                max_linear_velocity=50.0,
-                max_angular_velocity=50.0,
-                max_depenetration_velocity=10.0,
+                max_linear_velocity=10.0,
+                max_angular_velocity=20.0,
+                max_depenetration_velocity=2.0,
                 enable_gyroscopic_forces=True,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(
                 collision_enabled=True,
+                contact_offset=0.002,
+                rest_offset=0.0,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-                enabled_self_collisions=False,
-                solver_position_iteration_count=16,
-                solver_velocity_iteration_count=4,
-                sleep_threshold=0.005,
-                stabilization_threshold=0.001,
+                enabled_self_collisions=True,
+                solver_position_iteration_count=32,
+                solver_velocity_iteration_count=8,
+                sleep_threshold=0.001,
+                stabilization_threshold=0.0005,
             ),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
@@ -150,9 +198,9 @@ def create_rope_articulation_cfg(
         actuators={
             "rope_joints": ImplicitActuatorCfg(
                 joint_names_expr=["rope_pitch_.*", "rope_yaw_.*"],
-                effort_limit_sim=10.0,
-                stiffness=20.0,
-                damping=5.0,
+                effort_limit_sim=0.5,
+                stiffness=0.0,
+                damping=0.5,
             ),
         },
     )

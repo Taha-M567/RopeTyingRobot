@@ -430,14 +430,18 @@ class RopeKeyboardController:
             rope.write_root_state_to_sim(state)
             self._offset = [0.0, 0.0, 0.0]
 
-        # Set joint position targets so the actuator drives bends.
+        # Write joint positions directly (zero-stiffness rope ignores
+        # position targets, so we teleport joints to desired angles).
         if self._joints_dirty:
             targets = torch.tensor(
                 [self._joint_targets],
                 dtype=torch.float32,
                 device=rope.device,
             )
-            rope.set_joint_position_target(targets)
+            rope.write_joint_state_to_sim(
+                position=targets,
+                velocity=torch.zeros_like(targets),
+            )
             self._joints_dirty = False
 
         # Save current joint angles as a knot config YAML.

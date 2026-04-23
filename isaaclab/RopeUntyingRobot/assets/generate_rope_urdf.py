@@ -54,7 +54,7 @@ def generate_rope_urdf(
     num_segments: int = 16,
     segment_radius: float = 0.005,
     total_length: float = 0.45,
-    density: float = 5000.0,
+    density: float = 1500.0,
     joint_limit_deg: float = 120.0,
     output_path: Path | None = None,
 ) -> Path:
@@ -169,7 +169,7 @@ def generate_rope_urdf(
                 upper=f"{joint_limit_rad:.6f}",
                 effort="0.1", velocity="10.0",
             )
-            SubElement(pitch, "dynamics", damping="0.5", friction="0.0")
+            SubElement(pitch, "dynamics", damping="0.1", friction="0.0")
 
             # Yaw joint: hinge_i -> seg_{i+1} (rotate around Z)
             yaw = SubElement(
@@ -186,7 +186,7 @@ def generate_rope_urdf(
                 upper=f"{joint_limit_rad:.6f}",
                 effort="0.1", velocity="10.0",
             )
-            SubElement(yaw, "dynamics", damping="0.5", friction="0.0")
+            SubElement(yaw, "dynamics", damping="0.1", friction="0.0")
 
     # Pretty-print
     raw_xml = tostring(robot, encoding="unicode")
