@@ -353,3 +353,81 @@ class RopeReachEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 1.0 / 120.0
         self.sim.render_interval = self.decimation
         self.sim.physx.bounce_threshold_velocity = 0.2
+
+
+# ============================================================================
+# RopeReachEnd-SO100-v0: reach whichever end of the rope is closer
+# ============================================================================
+
+
+@configclass
+class EndpointObservationsCfg:
+    """Observation spec with rope endpoints in place of the rope COM."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """24-D policy obs: joints (10) + endpoints (6) + EE (3) + last_action (5)."""
+
+        joint_pos_rel = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "shoulder_pan",
+                        "shoulder_lift",
+                        "elbow_flex",
+                        "wrist_flex",
+                        "wrist_roll",
+                    ],
+                ),
+            },
+        )
+        joint_vel_rel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "shoulder_pan",
+                        "shoulder_lift",
+                        "elbow_flex",
+                        "wrist_flex",
+                        "wrist_roll",
+                    ],
+                ),
+            },
+        )
+        rope_endpoints = ObsTerm(func=mdp.rope_endpoint_pos)
+        ee_pos = ObsTerm(func=mdp.ee_pos_w)
+        last_action = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self) -> None:
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class EndpointRewardsCfg(RewardsCfg):
+    """Reach-the-nearer-end rewards replacing the COM-based ones."""
+
+    reaching_rope = RewTerm(
+        func=mdp.reaching_nearest_endpoint,
+        weight=1.0,
+        params={"sigma": 0.1},
+    )
+    close_to_rope = RewTerm(
+        func=mdp.close_to_nearest_endpoint,
+        weight=5.0,
+        params={"threshold": 0.02},
+    )
+
+
+@configclass
+class RopeReachEndEnvCfg(RopeReachEnvCfg):
+    """RopeReachEnd-SO100-v0: move the gripper to the nearer rope end."""
+
+    observations: EndpointObservationsCfg = EndpointObservationsCfg()
+    rewards: EndpointRewardsCfg = EndpointRewardsCfg()

@@ -1,16 +1,35 @@
 # Camera configuration
-# Units: pixels for image_size, mm for focal_length
+# Units: pixels for image_size, metres for extrinsics translation.
+#
+# `calibration.camera_matrix` and `calibration.dist_coeffs` are written
+# by `scripts/calibrate_camera.py`.  `extrinsics` must be filled in by
+# hand once the camera is mounted in its production rig.
 
 camera:
   device_id: 1
   image_size:
-    width: 480  # pixels
-    height: 640  # pixels
+    width: 640
+    height: 480
   calibration:
-    # Camera intrinsic matrix (3x3)
-    # Load from calibration file if available
+    # Camera intrinsic matrix (3x3, OpenCV convention).  Written by
+    # `scripts/calibrate_camera.py`.
     camera_matrix: null
+    # Distortion coefficients (k1, k2, p1, p2, k3).  Pre-undistort
+    # frames before passing them to `pixel_to_table_world` if these
+    # are non-zero.
     dist_coeffs: null
-    # Or specify focal length and principal point
-    focal_length: null  # mm
-    principal_point: null  # (cx, cy) in pixels
+  # Pose of the camera in the robot base frame.  Same OpenCV
+  # convention as `src.utils.geometry.CameraPose`:
+  #   +X_cam right, +Y_cam down, +Z_cam forward (along the optical axis).
+  # For a strict top-down mount aimed straight at the table, the
+  # rotation that takes camera axes to robot-base axes is:
+  #   rotation:
+  #     - [ 1.0,  0.0,  0.0]
+  #     - [ 0.0, -1.0,  0.0]
+  #     - [ 0.0,  0.0, -1.0]
+  extrinsics:
+    position: null    # [x, y, z] in metres in robot base frame.
+    rotation: null    # 3x3 matrix (list of 3 lists).
+  # Table top Z coordinate in robot base frame.  The rope rests here;
+  # `pixel_to_table_world` uses this for ray–plane intersection.
+  table_z: 0.0

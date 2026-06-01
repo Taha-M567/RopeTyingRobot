@@ -70,7 +70,7 @@ Sequential stages, each function takes numpy arrays in and returns dataclass out
 
 ### Isaac Lab simulation (`isaaclab/RopeUntyingRobot/`)
 
-- **Scene**: SO-100 6-DOF arm (5 arm joints + 1 gripper) + table + deformable FEM rope + camera
+- **Scene**: SO-100 6-DOF arm (5 arm joints + 1 gripper) + table + articulated rope chain (16 cylinder segments connected by pitch/yaw joints) + camera
 - **Robot asset pipeline**: `so100.urdf` → mesh-path repair → optional collision strip → `UrdfConverter` → `so100_from_urdf.usd` (auto-generated on first run, cached afterward). Config in `assets/so100_config.py` with two factory functions: `create_so100_articulation_cfg()` (sandbox) and `create_so100_rl_articulation_cfg()` (RL, separate arm/gripper actuator groups)
 - **Environment**: `RopeReach-SO100-v0` — 5D joint position actions (scale=0.5, relative to default pose), 21D observations (joint pos/vel rel, rope COM, EE pos via FrameTransformer, last action)
 - **Reward**: `reaching_rope` (1-tanh(d/0.1), weight 1.0) + `close_to_rope` (bonus at <2cm, weight 5.0) + action/velocity penalties
@@ -78,7 +78,7 @@ Sequential stages, each function takes numpy arrays in and returns dataclass out
 - **RL**: PPO with [128, 128, 64] MLP, 30 Hz control (120 Hz physics, 4x decimation), 10s episodes (300 steps)
 - **MDP definitions**: `source/.../mdp/` — observations.py, rewards.py, terminations.py
 - **Environment config**: `ropeuntyingrobot_env_cfg.py`
-- Deformable rope cannot use `replicate_physics`; each env has an independent rope instance
+- **Reach-the-end variant**: `RopeReachEnd-SO100-v0` — same scene, observation swaps rope COM (3-D) for both endpoint positions (6-D, total obs 24-D), reward targets whichever rope end is closer to the EE
 
 Environment phases (only Phase 1 implemented): Reach → Grasp → Straighten → Untie.
 
